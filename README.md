@@ -47,20 +47,50 @@ The `.cia` has Nintendo's game data in it, so keep it to your own consoles.
 
 ### On a Mac
 
-The Mac builder is the same builder as a Mac app, `SM64DS Enhanced Builder.app`.
+The Mac builder is the same builder as a Mac app, `SM64DS Enhanced Builder.app`,
+for macOS 11 or later on Apple silicon or Intel.
 
-1. Make it with `python3 port3ds/builder/mac/package.py`, which takes about a
-   minute (see [port3ds/builder/mac](port3ds/builder/mac/README.md)), or
-   download the Mac zip if the release has one and double-click it.
-2. Open the app. If you downloaded it, macOS won't open it the first time,
-   because it isn't notarized. On macOS 15 or later, go to System Settings >
-   Privacy & Security and click Open Anyway. On older versions, Control-click
-   the app and choose Open. One you made yourself opens straight away.
+1. Download the Mac zip if the release has one, or make the app yourself with
+   `python3 port3ds/builder/mac/package.py`, which takes about a minute (see
+   [port3ds/builder/mac](port3ds/builder/mac/README.md)). Double-click the zip
+   to unzip it, and drag the app to Applications.
+2. Open the app. The first time, macOS may not let you; see
+   [below](#if-macos-wont-open-it).
 3. Pick your dump, drag it onto the window, or drop it on the app's Dock icon.
    If your dump is on your Desktop or in Documents or Downloads, macOS asks
    whether the builder can use that folder; allow it, so that it can save the
    `.cia` there.
 4. Choose your settings and click Build (⌘B), as on Windows.
+
+#### If macOS won't open it
+
+The app isn't notarized by Apple, so on any Mac it was downloaded or copied to,
+macOS blocks it the first time, saying it couldn't check the app for malware.
+You only have to allow it once. (On the Mac that made it, it opens straight
+away.)
+
+On **macOS 15 or later**:
+
+1. Double-click the app, and click Done when macOS says it couldn't verify it.
+2. Open System Settings > Privacy & Security, and scroll down to Security.
+3. Next to "SM64DS Enhanced Builder" was blocked, click Open Anyway. (The
+   button is there for about an hour after you tried to open the app.)
+4. Click Open Anyway again, and enter your password or use Touch ID.
+
+On **macOS 11 to 14**, Control-click (or right-click) the app, choose Open, and
+click Open.
+
+**In Terminal**, on any version: if there's no Open Anyway, or macOS says the
+app is damaged and can't be opened, remove the mark macOS puts on downloaded
+files, then open the app as usual:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/SM64DS Enhanced Builder.app"
+```
+
+If the app isn't in Applications, type `xattr -dr com.apple.quarantine ` (with
+the space) and drag the app onto the Terminal window for its path. Only do this
+for a copy from this project's releases, or one you made yourself.
 
 ## Source
 

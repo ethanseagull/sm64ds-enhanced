@@ -57,7 +57,9 @@ Options:
 - `--arch arm64` or `--arch x86_64` builds for one kind of Mac only.
 - `--sign "Developer ID Application: ..."` signs with your certificate and
   hardened runtime, ready for `notarytool`. Without it the app is signed ad
-  hoc, so macOS asks before it opens the first time.
+  hoc: it opens straight away on the Mac that made it, but on any other Mac
+  macOS blocks it the first time. The main README says
+  [how to allow it](../../../README.md#if-macos-wont-open-it).
 
 When the Windows builder's C# changes, port the change to the Swift here.
 `package.py` warns when it is given a release it hasn't been checked against,
