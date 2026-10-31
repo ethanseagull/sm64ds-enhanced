@@ -1,0 +1,53 @@
+From cf975d40a453493921b1aa2d1ea63c0932e203d1 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 20:54:01 -0700
+Subject: [PATCH] hal: a wave that can't be decoded for lack of memory drops
+ the unused waves
+
+The wave cache only empties at a scene change, so a long stay could fill
+a small heap (the Old 3DS's: a Toad's star jingle in the castle
+basement). Out of memory, the waves nothing plays are dropped and the
+decode is tried once more; failing that, the note is silent instead of
+the game stopping.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/sdat/sdat.cpp | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/port/hal/sdat/sdat.cpp b/port/hal/sdat/sdat.cpp
+index bf71934d5..40a34f27e 100644
+--- a/port/hal/sdat/sdat.cpp
++++ b/port/hal/sdat/sdat.cpp
+@@ -37,6 +37,7 @@
+ #include <unordered_map>
+ #include <vector>
+ #include <memory>
++#include <new>
+ #include <string>
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+@@ -496,7 +497,19 @@ static WaveCache *decode_swav(const sd_u8 *rec)
+         if (!warned++) fprintf(stderr, "[sdat] unknown SWAV format %d\n", fmt);
+         return 0;
+     }
+-    wc.pcm.reset(new sd_s16[wc.n ? wc.n : 1]);
++    // The cache only empties at a scene change, so a long stay can fill a small
++    // heap (the Old 3DS's, 2026-10-29: a Toad's star in the castle basement).
++    // Out of memory, drop the waves nothing plays and try once more; failing
++    // that, the note is silent rather than the game stopped.
++    wc.pcm.reset(new (std::nothrow) sd_s16[wc.n ? wc.n : 1]);
++    if (!wc.pcm) {
++        const unsigned long freed = sd_waves_trim();
++        wc.pcm.reset(new (std::nothrow) sd_s16[wc.n ? wc.n : 1]);
++        fprintf(stderr, "[sdat] out of memory for a %lu KB wave: %lu KB of waves dropped, %s\n",
++                (unsigned long)wc.n * sizeof(sd_s16) >> 10, freed >> 10,
++                wc.pcm ? "decoded" : "the note skipped");
++        if (!wc.pcm) return 0;
++    }
+ 
+     wc.w.totalSamples = wc.n;
+     if (wc.w.loopStart >= wc.w.totalSamples) wc.w.loopStart = 0;
+-- 
+2.55.0.windows.5
+

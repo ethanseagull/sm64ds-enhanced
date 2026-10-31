@@ -1,0 +1,71 @@
+From 1250a77936e656e453c3825a2288ddc110874703 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 17:06:48 -0700
+Subject: [PATCH 09/13] hal: the boot worker's file-name tables in RAM on the
+ 3DS
+
+func_0201a2f8 loads the file-name tables into RAM (func_0205d94c) around
+ov000's entry and hands the archive back afterwards (func_0205d23c("rom", 3),
+func_0205c91c); the port skipped those lines because they only change where
+the 2058 lookups read the tables from. On the 3DS the "card" is files on the
+SD card and the card route cost 8.7 s of boot in Azahar; with the ROM's own
+lines, under SM64DS_HOST_3DS, the table builds in 1.4 s with the same ids.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/boot_os.cpp | 33 +++++++++++++++++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/port/hal/boot_os.cpp b/port/hal/boot_os.cpp
+index 3ab8e6a83..cdabc35dd 100644
+--- a/port/hal/boot_os.cpp
++++ b/port/hal/boot_os.cpp
+@@ -936,12 +936,45 @@ void port_boot_rom_game_init_tail(void)
+ //   the rest         UnloadOverlay(0), LoadOverlay(1), the sound group and the
+ //                    font are not this step and nothing about them changes.
+ // ---------------------------------------------------------------------------
++#if defined(SM64DS_HOST_3DS)
++/* THE RAM TABLES, ON THE 3DS. There the "card" is files on the SD card and
++   each of the 2058 lookups reading the file-name table off it cost ~8.6 s of
++   boot in Azahar. func_0201a2f8's own lines around the entry -- size the
++   tables, allocate, load them into RAM, and afterwards hand the card back and
++   free them -- are what the cartridge runs, and they make the lookups read
++   RAM. The ids are the same either way (see THE RAM TABLES above). */
++int func_0205d94c(int a, int b);
++void *func_0205d23c(void *p, int n);
++void func_0205c91c(void);
++void *_ZN6Memory8AllocateEj(unsigned int size);
++void _ZN6Memory10DeallocateEPv(void *p);
++static char g_rom_archive[] = "rom";   /* data_0208ee5c: the archive's name */
++#endif
++
+ void port_boot_rom_worker(void)
+ {
+     port_ov000_pack_check();
+     port_ov000_syms_patch();
+     const double t0 = port_ov0_table_clock_ms();
++#if defined(SM64DS_HOST_3DS)
++    void *fnt = 0;
++    {
++        const int size = func_0205d94c(0, 0);
++        fnt = size > 0 ? _ZN6Memory8AllocateEj((unsigned)size) : 0;
++        if (fnt)
++            func_0205d94c((int)(size_t)fnt, size);
++        say("boot worker: the file-name tables are in RAM for the lookups "
++            "(func_0201a2f8's func_0205d94c)");
++    }
++#endif
+     func_ov000_020aa420();
++#if defined(SM64DS_HOST_3DS)
++    if (fnt) {
++        func_0205d23c(g_rom_archive, 3);
++        func_0205c91c();
++        _ZN6Memory10DeallocateEPv(fnt);
++    }
++#endif
+     port_ov0_table_report(port_ov0_table_clock_ms() - t0);
+     say("boot worker: ov000's entry built the ov0 handle table "
+         "(func_0201a2f8's ov000 step)");
+-- 
+2.55.0.windows.5
+

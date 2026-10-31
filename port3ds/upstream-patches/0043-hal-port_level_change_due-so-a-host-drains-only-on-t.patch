@@ -1,0 +1,92 @@
+From 8f5b4ec5ee12298dd758640ff531fc2cf99dd162 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 21:54:05 -0700
+Subject: [PATCH] hal: port_level_change_due, so a host drains only on the swap
+ frame
+
+A side-effect-free read of whether port_level_change_poll will change the
+level this frame: a scene crossing due, or a request whose exit fade is over
+and whose load hold is not owed or used up. The 3DS host quiesced its core-2
+present and sub-screen worker on every frame a change was pending, through the
+~31-frame exit fade and the hold, where the poll returns without touching the
+level: each course exit faded at ~20 fps on hardware.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/level_change.cpp | 46 ++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 43 insertions(+), 3 deletions(-)
+
+diff --git a/port/hal/level_change.cpp b/port/hal/level_change.cpp
+index f9b5900a5..95670ddb5 100644
+--- a/port/hal/level_change.cpp
++++ b/port/hal/level_change.cpp
+@@ -2155,16 +2155,28 @@ static int port_level_scene_crossing(void);
+    plus slack, which is a harness rule and says so. */
+ extern "C" void *data_0209f5bc;            /* the installed fader */
+ 
++static int g_exit_fade_waited;   /* frames the wait below has held the change */
++
++/* the wait's own test, read without counting a frame (port_level_change_due) */
++static int port_level_exit_fade_waits(void)
++{
++    const void *fader = data_0209f5bc;
++    const int at_end =
++        fader && *(const int *)((const char *)fader + 4) == 0x1000;
++    return !(at_end || !fader || !port_stage_object() ||
++             !port_level_is_mounted(data_02092110) ||
++             g_exit_fade_waited >= 2 * 0x1e + 8);
++}
++
+ static int port_level_exit_fade_pending(void)
+ {
+-    static int waited = 0;
++    int &waited = g_exit_fade_waited;
+     static int said = 0;
+     const int want = data_02092110;
+     const void *fader = data_0209f5bc;
+     const int at_end =
+         fader && *(const int *)((const char *)fader + 4) == 0x1000;
+-    if (at_end || !fader || !port_stage_object() ||
+-        !port_level_is_mounted(want) || waited >= 2 * 0x1e + 8) {
++    if (!port_level_exit_fade_waits()) {
+         if (said)
+             std::fprintf(stderr, "  [lvl] exit fade: level %d answered after %d "
+                          "frame(s) (%s)\n", want, waited,
+@@ -2369,6 +2381,34 @@ extern "C" int port_level_change_poll(void)
+     return changed;
+ }
+ 
++/* WILL port_level_change_poll CHANGE SOMETHING THIS FRAME? Read without
++   side effects, just before the poll, for a host that must quiesce what
++   reads the level (the 3DS's present on core 2, its sub-screen worker) only
++   when the level is actually swapped or torn down: a scene crossing due, or a
++   level request whose exit fade is over and whose load hold is not owed or
++   used up. The exit fade (~31 frames) and the hold frames answer 0, as the
++   poll itself returns 0 on them without touching the level. */
++extern "C" int port_level_change_due(void)
++{
++    if (data_02092110 < 0)
++        return port_scene_crossing_due();
++    if (port_level_exit_fade_waits())
++        return 0;
++    if (g_hold_left > 0)
++        return 0;
++    if (g_hold_left < 0) {
++        /* the hold the poll would start now (hold_due sets the colour, which
++           the poll sets again; keep this read free of it) */
++        const int white = g_hold_white, tail = g_hold_tail;
++        const int hold = port_level_hold_due();
++        g_hold_white = white;
++        g_hold_tail = tail;
++        if (hold)
++            return 0;
++    }
++    return 1;
++}
++
+ /* ---- THE LEVEL-TO-SCENE CROSSING (run linkfull, lane GAMEOVER1) -----------
+  *
+  * THE REPORT: "When you die with 0 Lives and get a game over, the game simply
+-- 
+2.55.0.windows.5
+

@@ -1,0 +1,151 @@
+From 4a6d1690cd2d54e9e0038cadb127b7d783eee709 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 21:04:56 -0700
+Subject: [PATCH] ntr: a cheaper interpreter for a recorded frame (stream hash
+ off, no growth)
+
+A BoB profile on the 3DS (Azahar) put four avoidable costs in the command
+interpreter: the stream hash, a multiply a command word that only the PC
+harness reads (gx_stream_hash_enable(0) turns it off; default on); the
+record's vectors growing inside the frame (reserved at its start); the
+matrix-shape hash's test on every command (the opcode range first); and
+each vertex re-deciding its id's projection kind (kept on the id). The
+record is unchanged: port3ds's per-tick interpolation digests and the
+stress suite's screenshots are identical; BoB's actor phase 11.7 -> 10.8 ms.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp           | 39 +++++++++++++++++++++++++++++----------
+ port/ntr/include/ntr/gx.h |  3 +++
+ 2 files changed, 32 insertions(+), 10 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 98841b585..3c871f15d 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -1804,6 +1804,7 @@ struct RecMtx {
+        one -- what interp3ds would otherwise walk the whole record for */
+     uint32_t vhash, nv, first;
+     float cs[3];
++    uint8_t persp;         // proj is a perspective one (each vertex's id bit 15)
+ };
+ struct RecRun {
+     uint32_t first;        // its first triangle
+@@ -1845,8 +1846,7 @@ struct Rec {
+ };
+ Rec g_rec;
+ constexpr uint32_t REC_SHAPE0 = 2166136261u;
+-inline void rec_cmd(uint8_t cmd) {
+-    if (cmd < 0x16 || cmd > 0x1C) return;
++inline void rec_cmd(uint8_t cmd) {   // exec: a matrix-parameter command (0x16-0x1C)
+     Rec &R = g_rec;
+     if (R.geom) { R.shape = REC_SHAPE0; R.geom = 0; }
+     R.shape = (R.shape ^ (uint32_t)(cmd | ((g.mode & 3) << 8))) * 16777619u;
+@@ -1876,6 +1876,14 @@ void rec_frame_begin() {
+     R.runs.clear();
+     R.mtx.clear();
+     R.strip.clear();
++    /* room for a course's frame up front (a no-op once there): push_back
++       growing these mid-frame was ~3% of a BoB frame's samples on the 3DS,
++       where the record's buffers trade places with the card's each frame */
++    R.v.reserve(8192);
++    R.idx.reserve(16384);
++    R.runs.reserve(256);
++    R.mtx.reserve(1024);
++    R.strip.reserve(64);
+     R.bad = REC_OK;
+     R.shape = REC_SHAPE0;
+     R.geom = 0;
+@@ -1908,6 +1916,7 @@ inline void rec_vertex(int16_t x, int16_t y, int16_t z, bool new_id) {
+         m.nv = 0;
+         m.first = (uint32_t)R.v.size();
+         m.cs[0] = m.cs[1] = m.cs[2] = 0.0f;
++        m.persp = (m.proj.m[3] != 0.0f || m.proj.m[7] != 0.0f || m.proj.m[11] != 0.0f) ? 1 : 0;
+         R.mtx.push_back(m);
+     }
+     R.geom = 1;
+@@ -1915,8 +1924,7 @@ inline void rec_vertex(int16_t x, int16_t y, int16_t z, bool new_id) {
+     if (g.strip.empty()) R.strip_base = (uint32_t)R.v.size();
+     /* the id, and in bit 15 whether its projection is a perspective one (the
+        near-plane rule, ntr/gx.h GxRecVertex) */
+-    const Mat &pj = R.mtx.back().proj;
+-    const bool persp = pj.m[3] != 0.0f || pj.m[7] != 0.0f || pj.m[11] != 0.0f;
++    const bool persp = R.mtx.back().persp != 0;   // its proj's, kept when it was made
+     const uint16_t id = (uint16_t)((R.mtx.size() - 1) | (persp ? 0x8000u : 0u));
+     R.v.push_back({x, y, z, id, g.color, g.u, g.v});
+     if (g_rec_id_stats) {
+@@ -2475,7 +2483,7 @@ int param_count(uint8_t cmd);   /* defined below; the trap needs it */
+ void exec(uint8_t cmd, const uint32_t *p, int np) {
+     (void)np;
+     if (g_ip_rec) ip_push(IPK_CMD, cmd, np, p);
+-    if (g_rec.on) rec_cmd(cmd);
++    if ((unsigned)(cmd - 0x16) <= 6u && g_rec.on) rec_cmd(cmd);
+     if (!g_ip_replaying) {
+         ++g_cmd_n[cmd];
+         if (cmd == 0x50) g_swap_param = p[0];
+@@ -2923,7 +2931,12 @@ int g_port_have = 0;
+ }  // namespace
+ 
+ void gx_stream_note(uint32_t w);
+-void gx_write_fifo(uint32_t word) { ++g_fifo_n; gx_stream_note(word); feed(word); }
++int g_stream_hash_on = 1;   // gx_stream_hash_enable
++void gx_write_fifo(uint32_t word) {
++    ++g_fifo_n;
++    if (g_stream_hash_on) gx_stream_note(word);
++    feed(word);
++}
+ 
+ void gx_set_matrix_slot(int slot, const float m[16]) {
+     if (slot < 0 || slot >= 32) return;
+@@ -3348,9 +3361,11 @@ void gx_write_fifo_n(const uint32_t *src, int n)
+ {
+     if (n <= 0) return;
+     g_fifo_n += (uint32_t)n;
+-    uint32_t h = g_stream_hash;
+-    for (int i = 0; i < n; ++i) h = (h ^ src[i]) * 16777619u;
+-    g_stream_hash = h;
++    if (g_stream_hash_on) {
++        uint32_t h = g_stream_hash;
++        for (int i = 0; i < n; ++i) h = (h ^ src[i]) * 16777619u;
++        g_stream_hash = h;
++    }
+     const uint8_t *const pc = g_param_counts.n;
+     int i = 0;
+     while (i < n) {
+@@ -3439,7 +3454,7 @@ void gx_swap_counts(uint32_t &requested, uint32_t &applied,
+ 
+ void gx_write_port(uint32_t addr, uint32_t value) {
+     ++g_port_n;
+-    gx_stream_note(addr ^ value);
++    if (g_stream_hash_on) gx_stream_note(addr ^ value);
+     const uint8_t cmd = static_cast<uint8_t>((addr - 0x04000400u) >> 2);
+     const int need = param_count(cmd);
+     if (need <= 1) {
+@@ -3861,6 +3876,10 @@ void gx_record_id_stats(int on) {
+     g_rec_id_stats = on ? 1 : 0;
+ }
+ 
++void gx_stream_hash_enable(int on) {
++    g_stream_hash_on = on ? 1 : 0;
++}
++
+ void gx_record_to_list() {
+     rec_lean_list();
+ }
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index 01c25a2c3..f8eca96ce 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -337,6 +337,9 @@ void gx_pltt_base(uint32_t value);
+ // Diagnostic stream hash: every word entering the engine since the last
+ // reset, so smokes can separate "different stream" from "ignored stream".
+ uint32_t gx_stream_hash_reset();
++// 0: the stream hash above is not kept (a host whose code never reads it; it
++// cost a multiply a command word). Default 1.
++void gx_stream_hash_enable(int on);
+ uint32_t gx_state_hash();  // pos matrix + first slots
+ int gx_store_count_reset();
+ 
+-- 
+2.55.0.windows.5
+

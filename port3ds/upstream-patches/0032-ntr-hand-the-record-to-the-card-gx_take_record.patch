@@ -1,0 +1,202 @@
+From 11456fd65e895059ebbcf0f6154b2ba820428f8c Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 22:05:13 -0700
+Subject: [PATCH] ntr: hand the record to the card (gx_take_record)
+
+GxRecord in ntr/gx.h: the recorded vertices and index triples, each run with its polygon state (fill_tri_state's GxTriangle), and per matrix id one matrix from raw model coordinates to the framebuffer in homogeneous form (the 4.12 scale, position, projection, view_to_clip's widen or menu-wide squeeze and zoom, to_screen's viewport). SM64DS_GXREC=2 records without the per-frame check.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp           | 79 ++++++++++++++++++++++++++++++++++-----
+ port/ntr/include/ntr/gx.h | 45 ++++++++++++++++++++++
+ 2 files changed, 115 insertions(+), 9 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index da748e6d8..3eb6caeba 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -1785,12 +1785,7 @@ int smooth_try(const GxVertex &a, const GxVertex &b, const GxVertex &c,
+    but for the normals, which the record does not carry (they are the
+    smoother's, and a frame with the smoother on is not recorded). This is
+    step 5.1: the record proved whole before a card draws from it. */
+-struct RecVtx {
+-    int16_t x, y, z;
+-    uint16_t id;           // the matrices it rode (Rec::mtx)
+-    uint32_t color;        // 0xAARRGGBB, as project() latches it
+-    float u, v;            // texels, after texgen
+-};
++using RecVtx = GxRecVertex;   // model x, y, z; matrix id; colour; texels after texgen
+ struct RecMtx {
+     Mat pos, proj;
+     int vp[4];             // g.vp_x, vp_y, vp_w, vp_h
+@@ -1798,6 +1793,7 @@ struct RecMtx {
+ };
+ struct RecRun {
+     uint32_t first;        // its first triangle
++    GxTriangle st;         // fill_tri_state's answer, for the card
+     const uint32_t *tex_rgba;
+     int tw, th;
+     uint8_t tex_wrap, tex_scale;
+@@ -1815,11 +1811,12 @@ struct Rec {
+ Rec g_rec;
+ enum { REC_OK = 0, REC_IDS, REC_STRIP };
+ 
++// SM64DS_GXREC: 1 record and check every frame (rec_check), 2 record only.
+ int rec_wanted() {
+     static int v = -1;
+     if (v < 0) {
+         const char *e = getenv("SM64DS_GXREC");
+-        v = (e && *e && *e != '0') ? 1 : 0;
++        v = (e && *e >= '1' && *e <= '9') ? *e - '0' : 0;
+     }
+     return v;
+ }
+@@ -1872,8 +1869,9 @@ inline void rec_tri(const GxVertex &a, const GxVertex &b, const GxVertex &c, boo
+         return;
+     }
+     if (new_run || R.runs.empty()) {
+-        RecRun r;
++        RecRun r{};
+         r.first = (uint32_t)(R.idx.size() / 3);
++        fill_tri_state(r.st);
+         r.tex_rgba = g.tex_rgba;
+         r.tw = g.tw;
+         r.th = g.th;
+@@ -2136,7 +2134,7 @@ bool rec_same_tri(const GxTriangle &p, const GxTriangle &q) {
+    with its polygon list. Every 120 frames a [gxrec] line: how many were
+    recorded and alike, and what was in them. */
+ void rec_check() {
+-    if (!rec_wanted()) return;
++    if (rec_wanted() != 1) return;
+     static unsigned frames, recorded, alike, differ, stopped[3], shown;
+     static unsigned long long verts, tris, runs, ids;
+     static std::vector<GxTriangle> m;
+@@ -3680,6 +3678,69 @@ const GxTriangle *gx_take_triangles(std::vector<GxTriangle> &into) {
+     return had;
+ }
+ 
++/* THE RECORD FOR THE CARD (ntr/gx.h, GxRecord). Each id's matrix is the
++   chain project() and to_screen run, as one product: the raw 4.12 scale, the
++   position matrix, the projection, view_to_clip's widen (or the menu-wide
++   squeeze and zoom, under the id's own sprite bracket), and to_screen's
++   viewport map in homogeneous form (X w = x vp_w/2 + w (vp_w/2 + vp_x),
++   Y w = -y vp_h/2 + w (vp_h/2 + vp_y), Z w = z/2 + w/2). */
++int gx_take_record(GxRecord &into) {
++    Rec &R = g_rec;
++    into.runs.clear();
++    into.mtx.clear();
++    if (!R.on) {
++        into.v.clear();
++        into.idx.clear();
++        return 0;
++    }
++    into.v.swap(R.v);
++    into.idx.swap(R.idx);
++    R.v.clear();
++    R.idx.clear();
++    const uint32_t ntri = (uint32_t)(into.idx.size() / 3);
++    into.runs.resize(R.runs.size());
++    for (size_t r = 0; r < R.runs.size(); ++r) {
++        GxRecRun &o = into.runs[r];
++        o.st = R.runs[r].st;
++        o.first = R.runs[r].first;
++        o.count = (r + 1 < R.runs.size() ? R.runs[r + 1].first : ntri) - o.first;
++    }
++    const bool mw = menu_wide();
++    into.mtx.resize(R.mtx.size());
++    for (size_t k = 0; k < R.mtx.size(); ++k) {
++        const RecMtx &m = R.mtx[k];
++        const bool persp = m.proj.m[3] != 0.0f || m.proj.m[7] != 0.0f || m.proj.m[11] != 0.0f;
++        Mat W = Mat::identity();
++        if (mw) {
++            W.m[0] = (float)present_w() / (float)active_w;
++            W.m[5] = (float)present_h() / (float)active_h;
++            if (!m.sprite && (g.mw_zoom != 1.0f || g.mw_dy != 0.0f)) {
++                W.m[0] *= g.mw_zoom;
++                W.m[5] *= g.mw_zoom;
++                W.m[13] = g.mw_dy;
++            }
++        } else if (persp) {
++            W.m[0] = hor_widen();
++        }
++        Mat S{};
++        S.m[0] = m.vp[2] * 0.5f;
++        S.m[12] = m.vp[2] * 0.5f + m.vp[0];
++        S.m[5] = -m.vp[3] * 0.5f;
++        S.m[13] = m.vp[3] * 0.5f + m.vp[1];
++        S.m[10] = 0.5f;
++        S.m[14] = 0.5f;
++        S.m[15] = 1.0f;
++        Mat t = mul(mul(mul(m.pos, m.proj), W), S);
++        for (int i = 0; i < 12; ++i) t.m[i] *= FX12;   // rows 0-2: the raw coordinates' scale
++        std::memcpy(into.mtx[k].m, t.m, sizeof t.m);
++        into.mtx[k].persp = persp ? 1 : 0;
++    }
++    R.runs.clear();
++    R.mtx.clear();
++    R.on = 0;
++    return 1;
++}
++
+ /* SM64DS_MAT_LOG=1: once, after the first full frame is assembled, the
+    LIGHTING side of the same picture -- every distinct POLYGON_ATTR, DIF_AMB
+    and SPE_EMI word that reached exec(), the light table the engine is
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index c9b73f204..e4178d9a5 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -176,6 +176,51 @@ struct GxGrid {
+     uint8_t from_pool;      // points are in the shape store's pool, else the frame arena
+ };
+ 
++// ---- THE FRAME FOR A CARD THAT TRANSFORMS VERTICES ITSELF (the 3DS port's
++// step 5; gx.cpp's struct Rec has the whole argument). SM64DS_GXREC=1 records
++// the frame beside the polygon list:
++//   v      each vertex as the display list gave it: model x, y, z (raw 4.12,
++//          the VTX command's own), the id of the matrices it rode, its colour
++//          (0xAARRGGBB, as the list's) and texel coordinates (after texgen)
++//   idx    three indices into v per triangle, in the list's order and winding
++//   runs   the triangles under one polygon state: `st` is that state (a
++//          GxTriangle with its corners zeroed, as GxGrid::st), `first` its
++//          first triangle, `count` how many
++//   mtx    per id, model space -> the framebuffer in homogeneous form: a
++//          model point (x, y, z, 1) * m (row vector, raw units scaled in)
++//          is (X w, Y w, Z w, w) with X, Y the framebuffer pixel and Z the
++//          list's depth (GxVertex::z after the divide). The near clip is the
++//          plane Z = 0 when `persp`; an orthographic id has no near plane
++//          (gx.cpp clips it at w only).
++// The triangle each run's corners make, clipped at that plane, is the list's
++// triangle; each triangle rides the projection of its newest vertex (the
++// largest index), which is the projection gx.cpp clipped it under.
++struct GxRecVertex {
++    int16_t x, y, z;
++    uint16_t id;
++    uint32_t color;
++    float u, v;
++};
++struct GxRecRun {
++    GxTriangle st;
++    uint32_t first, count;
++};
++struct GxRecMatrix {
++    float m[16];
++    uint8_t persp;
++};
++struct GxRecord {
++    std::vector<GxRecVertex> v;
++    std::vector<uint32_t> idx;
++    std::vector<GxRecRun> runs;
++    std::vector<GxRecMatrix> mtx;
++};
++// This frame's record into `into` (its vectors swapped in, so the record
++// survives the next gx_reset, and gx.cpp keeps `into`'s old capacity): 1 when
++// the frame was recorded whole, 0 when it was not (SM64DS_GXREC off, a frame
++// the recorder does not take, or one it stopped on); `into` is then emptied.
++int gx_take_record(GxRecord &into);
++
+ // Feed the engine. `gx_write_port` takes a geometry-port address in
+ // 0x4000440..0x40005FF; `gx_write_fifo` takes a word pushed at 0x4000400.
+ void gx_write_port(uint32_t addr, uint32_t value);
+-- 
+2.49.0
+

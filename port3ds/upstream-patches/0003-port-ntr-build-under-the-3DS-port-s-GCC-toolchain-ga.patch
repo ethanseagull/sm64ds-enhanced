@@ -1,0 +1,139 @@
+From 5ab05345fbf900459037dee5d535a5c3dac23f1d Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 17:25:56 -0700
+Subject: [PATCH 03/13] port/ntr: build under the 3DS port's GCC toolchain
+ (gate 4a)
+
+io.cpp: map the DS regions through host3ds_map_fixed (MEMOP_MAP aliases)
+on SM64DS_HOST_3DS; keep the occupant-naming diagnostic Windows-only.
+rt.cpp: the fiber backend is Win32 fibers or, on the 3DS port, the same API
+from port3ds/compat (NTR_HAS_FIBERS).
+runtime.cpp: the DMA/timer callback band as one array with an assembler
+alias at +0x30, since GCC has no grouped sections to keep it adjacent.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/io.cpp      | 10 +++++++++-
+ port/ntr/rt.cpp      | 15 ++++++++++++---
+ port/ntr/runtime.cpp | 10 ++++++++++
+ 3 files changed, 31 insertions(+), 4 deletions(-)
+
+diff --git a/port/ntr/io.cpp b/port/ntr/io.cpp
+index 803b56623..2736e5e38 100644
+--- a/port/ntr/io.cpp
++++ b/port/ntr/io.cpp
+@@ -16,6 +16,10 @@
+ #if defined(_WIN32)
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
++#elif defined(SM64DS_HOST_3DS)
++/* New 3DS port: the region is heap memory aliased at the DS address with
++   svcControlMemory(MEMOP_MAP); see port3ds/src/host3ds_mem.cpp. */
++extern "C" void *host3ds_map_fixed(uintptr_t base, size_t size);
+ #else
+ #include <sys/mman.h>
+ #endif
+@@ -388,6 +392,8 @@ void *map_fixed(uintptr_t base, size_t size) {
+                            MEM_RESERVE | MEM_COMMIT |
+                                (watch_writes(base) ? MEM_WRITE_WATCH : 0),
+                            PAGE_READWRITE);
++#elif defined(SM64DS_HOST_3DS)
++    void *p = host3ds_map_fixed(base, size);
+ #else
+     void *p = mmap(reinterpret_cast<void *>(base), size, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+@@ -1006,14 +1012,16 @@ const char *io_reserve_player_text() {
+     if (!lost_name) return "";
+ 
+     // The clearest single fact we have: what was actually sitting there.
+-    char namebuf[MAX_PATH];
+     const char *who = nullptr;
++#if defined(_WIN32)
++    char namebuf[MAX_PATH];
+     for (unsigned k = 0; k < g_occ_n; ++k) {
+         if (g_occ[k].region_base == lost_base) {
+             who = occupant_name(g_occ[k], namebuf, sizeof namebuf);
+             break;
+         }
+     }
++#endif
+ 
+     int n = std::snprintf(g_player, sizeof g_player,
+         "The game needs one fixed range of memory addresses and could not get "
+diff --git a/port/ntr/rt.cpp b/port/ntr/rt.cpp
+index 4c6082116..43f01a8a1 100644
+--- a/port/ntr/rt.cpp
++++ b/port/ntr/rt.cpp
+@@ -15,6 +15,15 @@ extern "C" void *_ZN3IRQ13GetIRQHandlerEj(unsigned mask);
+ #include <windows.h>
+ #endif
+ 
++/* The fiber backend: Win32 fibers, or on the New 3DS port the same API from
++   port3ds/compat (a cooperative ARM context switch behind <windows.h>). */
++#if defined(_WIN32) || defined(SM64DS_HOST_3DS)
++#define NTR_HAS_FIBERS 1
++#if defined(SM64DS_HOST_3DS)
++#include <windows.h>
++#endif
++#endif
++
+ namespace ntr {
+ namespace {
+ 
+@@ -48,7 +57,7 @@ struct Runtime {
+ 
+ Runtime g;
+ 
+-#if defined(_WIN32)
++#if defined(NTR_HAS_FIBERS)
+ void CALLBACK game_trampoline(void *) {
+     g.entry();
+     g.game_done = true;
+@@ -212,7 +221,7 @@ void run_scanlines() {
+ }  // namespace
+ 
+ void rt_vblank_wait() {
+-#if defined(_WIN32)
++#if defined(NTR_HAS_FIBERS)
+     if (!g.game_fiber) return;   // not running under rt_run; nothing to yield to
+     reg32(REG_IF) |= IRQ_VBLANK;
+     SwitchToFiber(g.host_fiber);
+@@ -478,7 +487,7 @@ void rt_irq_boot_state() {
+ }
+ 
+ uint64_t rt_run(void (*game)(), FrameHook hook, uint64_t max_frames) {
+-#if !defined(_WIN32)
++#if !defined(NTR_HAS_FIBERS)
+     (void)game; (void)hook; (void)max_frames;
+     std::fprintf(stderr, "rt_run: fiber backend is Windows-only so far\n");
+     return 0;
+diff --git a/port/ntr/runtime.cpp b/port/ntr/runtime.cpp
+index 872e4ba43..426c3ce73 100644
+--- a/port/ntr/runtime.cpp
++++ b/port/ntr/runtime.cpp
+@@ -196,12 +196,22 @@ DSSTATE_END
+  * data_020a60f4 IS data_020a60c4 + 0x30 again. port_irqcb_band_ok() reads the
+  * layout back and the timer model refuses to run on a band that came apart. */
+ struct PortIrqCbEnt { unsigned handler, active, arg; };
++#if defined(SM64DS_HOST_3DS)
++/* GCC has no grouped sections. The band is one 8-entry array instead, and
++   data_020a60f4 is an assembler alias 0x30 bytes into it, so the adjacency
++   holds by construction rather than by section ordering. */
++PortIrqCbEnt data_020a60c4[8] = {};          /* DMA 0..3, then timer 0..3   */
++extern PortIrqCbEnt data_020a60f4[4];
++__asm__(".global data_020a60f4\n"
++        ".set data_020a60f4, data_020a60c4 + 0x30\n");
++#else
+ __pragma(section(".dsstate$irqcb00", read, write))
+ __pragma(section(".dsstate$irqcb01", read, write))
+ __declspec(allocate(".dsstate$irqcb00")) __declspec(align(4))
+ PortIrqCbEnt data_020a60c4[4] = {};          /* DMA 0..3 callbacks          */
+ __declspec(allocate(".dsstate$irqcb01")) __declspec(align(4))
+ PortIrqCbEnt data_020a60f4[4] = {};          /* timer 0..3 callbacks        */
++#endif
+ }
+ 
+ extern "C" int port_irqcb_band_ok(void)
+-- 
+2.55.0.windows.5
+

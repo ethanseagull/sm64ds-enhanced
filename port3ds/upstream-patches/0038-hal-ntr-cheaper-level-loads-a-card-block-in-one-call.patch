@@ -1,0 +1,192 @@
+From fec5de1101167f1425ece89765eab574c2a8bc0b Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 19:18:10 -0700
+Subject: [PATCH] hal/ntr: cheaper level loads (a card block in one call,
+ run-at-a-time LZ decode, memset fill), honest lvl-perf
+
+ntr/card.cpp: port_card_block_direct reads one B7h block with the end state of
+the driver's 128 polled data-port reads (the 3DS wraps the ROM's page reader
+with it). hal/fs.cpp: DecompressLZ16 copies runs (memcpy where a
+back-reference does not overlap), byte for byte the old output (all 1,308 LZ77
+files compared). hal/heap_globals.cpp: MultiStore_Int is a memset for a value
+of four equal bytes. hal/level_change.cpp: the [lvl-perf] spans start over as
+a change fires (the first change had reported the level's first boot too).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/fs.cpp           | 27 +++++++++++++++++++++++----
+ port/hal/heap_globals.cpp | 22 +++++++++++++++++++++-
+ port/hal/level_boot.cpp   |  9 +++++++++
+ port/hal/level_change.cpp |  2 ++
+ port/ntr/card.cpp         | 25 +++++++++++++++++++++++++
+ 5 files changed, 80 insertions(+), 5 deletions(-)
+
+diff --git a/port/hal/fs.cpp b/port/hal/fs.cpp
+index bf34c7a2c..daec5812a 100644
+--- a/port/hal/fs.cpp
++++ b/port/hal/fs.cpp
+@@ -296,7 +296,13 @@ unsigned int func_02018a24(unsigned int handle);
+ 
+ /* LZ77 type-0x10 decode; src points at the u32 header
+    PORT_HOST_ABI: src TU is an ARM asm hatch (VRAM-safe halfword dance),
+-   MSVC cannot assemble; the HAL carries a byte-identical C decode. */
++   MSVC cannot assemble; the HAL carries a byte-identical C decode.
++   The same decode a run at a time (it was a byte at a time, the largest
++   part of a level change's CPU on the New 3DS once its file opens were
++   gone): a flag byte of eight literals with eight to spare is one copy, a
++   back-reference that does not overlap its own output is a memcpy, and one
++   that does (disp < len: a repeated pattern) is copied forwards byte by
++   byte as before. Output byte for byte the old loop's, clipped at size. */
+ void DecompressLZ16(void *src_, void *dst_)
+ {
+     const u8 *s = (const u8 *)src_;
+@@ -306,15 +312,28 @@ void DecompressLZ16(void *src_, void *dst_)
+     s += 4;
+     while (out < size) {
+         u8 flags = *s++;
++        if (flags == 0 && size - out >= 8) {
++            memcpy(d + out, s, 8);
++            s += 8;
++            out += 8;
++            continue;
++        }
+         for (int bit = 0; bit < 8 && out < size; ++bit) {
+             if (flags & (0x80 >> bit)) {
+                 u32 len = (s[0] >> 4) + 3;
+                 u32 disp = ((s[0] & 0xF) << 8 | s[1]) + 1;
+                 s += 2;
+-                while (len-- && out < size) {
+-                    d[out] = d[out - disp];
+-                    ++out;
++                if (len > size - out)
++                    len = size - out;
++                u8 *p = d + out;
++                const u8 *q = p - disp;
++                if (disp >= len) {
++                    memcpy(p, q, len);
++                } else {
++                    for (u32 i = 0; i < len; ++i)
++                        p[i] = q[i];
+                 }
++                out += len;
+             } else {
+                 d[out++] = *s++;
+             }
+diff --git a/port/hal/heap_globals.cpp b/port/hal/heap_globals.cpp
+index 798b211af..56ad4de7e 100644
+--- a/port/hal/heap_globals.cpp
++++ b/port/hal/heap_globals.cpp
+@@ -14,6 +14,7 @@
+ // decorated forms.
+ 
+ #include "dsstate_seg.h"
++#include <string.h>
+ 
+ extern "C" {
+ // The single real storage. Memory::rootHeapIterator is a NestedHeapIterator
+@@ -30,9 +31,28 @@ DSSTATE_END
+ // SDK asm primitive (stmia burst fill) -> plain word fill on host. The
+ // frontier classifies its TU as HAL-owned; this is the HAL half.
+ // PORT_HOST_ABI: ARM asm primitive (stmia burst fill), MSVC cannot assemble.
++// A value of four equal bytes (the heaps' zero fill, nearly every call) is a
++// memset, which the C library does in bursts; a word at a time was a fifth
++// of a level change's CPU on the New 3DS (port3ds span_sample_azahar.py,
++// ExpandingHeapAllocator::AllocateNode). The same len / 4 words either way.
+ void MultiStore_Int(int val, int *dst, int len)
+ {
+-    for (int i = 0; i < len / 4; ++i)
++    const int n = len / 4;
++    if (n <= 0)
++        return;
++    const unsigned v = (unsigned)val;
++    if ((v & 0xFFu) * 0x01010101u == v) {
++        memset(dst, (int)(v & 0xFFu), (size_t)n * 4);
++        return;
++    }
++    int i = 0;
++    for (; i + 4 <= n; i += 4) {
++        dst[i] = val;
++        dst[i + 1] = val;
++        dst[i + 2] = val;
++        dst[i + 3] = val;
++    }
++    for (; i < n; ++i)
+         dst[i] = val;
+ }
+ }
+diff --git a/port/hal/level_boot.cpp b/port/hal/level_boot.cpp
+index 74af69dd9..5d08c0d7f 100644
+--- a/port/hal/level_boot.cpp
++++ b/port/hal/level_boot.cpp
+@@ -2714,6 +2714,15 @@ extern "C" void port_lvlperf_note(int span, double ms)
+         g_lvlperf_ms[span] += ms;
+ }
+ 
++/* The spans start over (hal/level_change.cpp, as a change fires): the boot
++   span had kept the level's FIRST boot too, so the first change after a
++   boot printed that boot's seconds as its own (hardware: "boot=6658ms" for
++   a castle door whose frame took 1310 ms; the [slow] line has the change). */
++extern "C" void port_lvlperf_reset(void)
++{
++    g_lvlperf_ms[0] = g_lvlperf_ms[1] = g_lvlperf_ms[2] = g_lvlperf_ms[3] = 0;
++}
++
+ extern "C" void port_lvlperf_emit(void)
+ {
+     std::fprintf(stderr,
+diff --git a/port/hal/level_change.cpp b/port/hal/level_change.cpp
+index b7e394b69..d3982e38d 100644
+--- a/port/hal/level_change.cpp
++++ b/port/hal/level_change.cpp
+@@ -187,6 +187,7 @@ void port_level_stage_reseat(void *stage);
+ double port_lvlperf_now(void);
+ void port_lvlperf_note(int span, double ms);
+ void port_lvlperf_emit(void);
++void port_lvlperf_reset(void);
+ unsigned _ZN22ExpandingHeapAllocator10MemoryLeftEv(void *self);
+ extern void *data_020a0eac;              /* Memory::gameHeapPtr */
+ 
+@@ -1943,6 +1944,7 @@ extern "C" int port_level_change_apply(void)
+     g_apply_pending_scene = data_02092664;
+     port_scene_request_release("a level change is being applied");
+ 
++    port_lvlperf_reset();
+     const double lvlperf_t0 = port_lvlperf_now();
+     if (!port_level_teardown()) {
+         std::fprintf(stderr, "  [lvl] teardown failed; the change is "
+diff --git a/port/ntr/card.cpp b/port/ntr/card.cpp
+index bc1430588..648d27367 100644
+--- a/port/ntr/card.cpp
++++ b/port/ntr/card.cpp
+@@ -259,3 +259,28 @@ struct CardRegister {
+ CardRegister g_card_register;
+ 
+ }  // namespace
++
++// ONE B7h BLOCK IN ONE CALL (port3ds/game/card_fast.cpp wraps the ROM's page
++// reader, src/func_02060a64.c, with it). The driver stores ROMCTRL and then
++// polls it and reads the data port 128 times a 0x200-byte block: on the New
++// 3DS every one of those is an emulated register access, and they were the
++// CPU cost of a level change once the files themselves came from one pack.
++// This is the same block: ROMCTRL latched as the driver's store latches it,
++// the block fetched by start_block from the command bytes the driver wrote
++// (func_02060d98), its words copied to `out` (at most `max_words`, as the
++// driver's loop keeps at most 0x200), and the end state of the last data-port
++// read -- finish_block's ROMCTRL idle and the IF bit when AUXSPICNT asks.
++// The statistics count it as the polled path would. Returns the words.
++extern "C" unsigned port_card_block_direct(uint32_t romctrl, uint32_t *out, unsigned max_words)
++{
++    reg32(REG_ROMCTRL) = romctrl;
++    if (!(romctrl & ROMCTRL_BUSY)) return 0;
++    start_block(romctrl);
++    if (!g_blk.active) return 0;
++    const unsigned n = g_blk.words < max_words ? g_blk.words : max_words;
++    std::memcpy(out, g_blk.data, 4u * n);
++    g_st.words += g_blk.words;
++    g_blk.done = g_blk.words;
++    finish_block();
++    return n;
++}
+-- 
+2.55.0.windows.5
+

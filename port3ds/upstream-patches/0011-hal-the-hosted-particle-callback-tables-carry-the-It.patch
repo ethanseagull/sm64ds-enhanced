@@ -1,0 +1,155 @@
+From 13d0a50fb4f35434074e8daabb1e03be5e64d92d Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 05:27:19 -0700
+Subject: [PATCH 11/13] hal: the hosted particle callback tables carry the
+ Itanium head on the 3DS
+
+On the 3DS the tracker's constructor is GCC C++, and GCC's constructors
+install `table + 8`, the address point past [offset-to-top][typeinfo]. For
+the eight callback classes whose key function only a host face defines, the
+link keeps these hosted two-word arrays (linkfix HOST_KEEP), so slot 1 was
+read from past their end: null, the first time a level's tracker updated a
+water callback (Jolly Roger Bay, once Stage::Render ran). Under
+SM64DS_HOST_3DS every table gets the two head words (VT_HEAD) and the
+startup check reads past them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/particle_vtable.cpp | 68 ++++++++++++++++++++++--------------
+ 1 file changed, 41 insertions(+), 27 deletions(-)
+
+diff --git a/port/hal/particle_vtable.cpp b/port/hal/particle_vtable.cpp
+index 75f4866ef..e0e675b13 100644
+--- a/port/hal/particle_vtable.cpp
++++ b/port/hal/particle_vtable.cpp
+@@ -105,78 +105,92 @@ void _ZN5dPa_c7level_c23cleanParticleCallback_c8OnUpdateERN8Particle6SystemEb(vo
+ #define SPAWN(f) ((void *)&f)
+ #define UPDATE(f) ((void *)&f)
+ 
++/* THE 3DS STORES THE ADDRESS POINT. The tracker's constructor is real C++ on
++   the 3DS (GCC), and GCC's constructors install `table + 8`, the Itanium
++   address point past [offset-to-top][typeinfo]. Where one of these arrays is
++   the table the link keeps (port3ds/tools/linkfix.py's HOST_KEEP: the eight
++   whose key function only a host face defines), it must carry those two words
++   in front, or slot 1 is read from past its end. VT_HEAD is them. */
++#if defined(SM64DS_HOST_3DS)
++#define VT_HEAD 2
++#define VT_HEAD_WORDS 0, 0,
++#else
++#define VT_HEAD 0
++#define VT_HEAD_WORDS
++#endif
++
+ DSSTATE_BEGIN
+ /* BubbleCallback.  from:0x0208f3a4 to:0x02022640 | 0x0208f3a8 to:0x02022464 */
+-void *_ZTVN5dPa_c7level_c16bubbleCallback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c16simpleCallback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c16bubbleCallback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c16simpleCallback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c16bubbleCallback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ /* Callback (the base).
+    from:0x0208f3b4 to:0x020226d0 | 0x0208f3b8 to:0x020226c8 */
+-void *_ZTVN5dPa_c7level_c10callback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c10callback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c10callback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c10callback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c10callback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ /* SimpleCallback.  from:0x0208f3c4 to:0x02022640 | 0x0208f3c8 to:0x02022630 */
+-void *_ZTVN5dPa_c7level_c16simpleCallback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c16simpleCallback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c16simpleCallback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c16simpleCallback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c16simpleCallback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ /* EndingStarGlitterCallback.
+    from:0x0208f3d4 to:0x0202222c | 0x0208f3d8 to:0x020221dc */
+-void *_ZTVN5dPa_c7level_c20edStarKiraCallback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c20edStarKiraCallback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c20edStarKiraCallback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c20edStarKiraCallback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c20edStarKiraCallback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ /* SplashCallback.  from:0x0208f3e4 to:0x02022640 | 0x0208f3e8 to:0x020224fc */
+-void *_ZTVN5dPa_c7level_c16splashCallback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c16simpleCallback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c16splashCallback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c16simpleCallback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c16splashCallback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ /* CheckWaterCallback.
+    from:0x0208f3f4 to:0x020226d0 | 0x0208f3f8 to:0x02022160 */
+-void *_ZTVN5dPa_c7level_c20checkWaterCallback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c10callback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c20checkWaterCallback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c10callback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c20checkWaterCallback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ /* CheckLavaCallback.
+    from:0x0208f404 to:0x02022328 | 0x0208f408 to:0x020222f0 */
+-void *_ZTVN5dPa_c7level_c20checkYoganCallback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c20checkYoganCallback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c20checkYoganCallback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c20checkYoganCallback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c20checkYoganCallback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ /* ScaleCallback.  from:0x0208f414 to:0x020225d0 | 0x0208f418 to:0x020225a8 */
+-void *_ZTVN5dPa_c7level_c15scaleCallback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c15scaleCallback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c15scaleCallback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c15scaleCallback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c15scaleCallback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ /* CheckWaterRippleCallback.
+    from:0x0208f424 to:0x020226d0 | 0x0208f428 to:0x020220a4 */
+-void *_ZTVN5dPa_c7level_c26checkWaterRippleCallback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c10callback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c26checkWaterRippleCallback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c10callback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c26checkWaterRippleCallback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ /* ClipCallback.  from:0x0208f434 to:0x020226d0 | 0x0208f438 to:0x02021e70 */
+-void *_ZTVN5dPa_c7level_c14clipCallback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c10callback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c14clipCallback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c10callback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c14clipCallback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ /* FitWaterSimpleCallback.
+    from:0x0208f444 to:0x02022640 | 0x0208f448 to:0x02022418 */
+-void *_ZTVN5dPa_c7level_c24fitWaterSimpleCallback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c16simpleCallback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c24fitWaterSimpleCallback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c16simpleCallback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c24fitWaterSimpleCallback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ /* FitWaterCallback.
+    from:0x0208f454 to:0x020226d0 | 0x0208f458 to:0x0202202c */
+-void *_ZTVN5dPa_c7level_c18fitWaterCallback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c10callback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c18fitWaterCallback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c10callback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c18fitWaterCallback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ /* CleanParticleCallback.
+    from:0x0208f464 to:0x020226d0 | 0x0208f468 to:0x02021e40 */
+-void *_ZTVN5dPa_c7level_c23cleanParticleCallback_cE[2] = {
+-    SPAWN(_ZN5dPa_c7level_c10callback_c14SpawnParticlesERN8Particle6SystemE),
++void *_ZTVN5dPa_c7level_c23cleanParticleCallback_cE[VT_HEAD + 2] = {
++    VT_HEAD_WORDS SPAWN(_ZN5dPa_c7level_c10callback_c14SpawnParticlesERN8Particle6SystemE),
+     UPDATE(_ZN5dPa_c7level_c23cleanParticleCallback_c8OnUpdateERN8Particle6SystemEb),
+ };
+ 
+@@ -240,7 +254,7 @@ void port_particle_vtables_check(void)
+     };
+     for (int i = 0; i < 13; ++i) {
+         for (int s = 0; s < 2; ++s) {
+-            const void *p = vts[i][s];
++            const void *p = vts[i][VT_HEAD + s];
+             if (!p) {
+                 std::fprintf(stderr, "FATAL: particle vtable %08x slot %d is "
+                              "null -- nothing seated it\n", addr[i], s);
+-- 
+2.55.0.windows.5
+

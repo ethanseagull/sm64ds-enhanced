@@ -1,0 +1,175 @@
+From ebb1a7b31029ad16404c394835435f1cfee31870 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 09:40:46 -0700
+Subject: [PATCH] hal, ntr: the held frame's picture as a signature; the scan
+ cache's hit count
+
+A 3DS host that keeps a 2D picture on the card while it is unchanged hashed
+the whole picture each frame to know (2.8-3.3 ms a frame on hardware). The
+compositor now folds the spans it blits onto a frame held on the card
+(position and word) into a signature, and any other write it or its fade
+makes to the framebuffer (the classic loops, a lifted band, the backdrop
+hidden outside a window, the card's own 2D path, a processor fade) marks the
+frame's signature unknown. port_message_composite_signature answers it once
+per composite. ppu_sub_scan_hits exposes how many scan-outs the
+unchanged-frame skip handed back, so a host can tell a buffer left as it was
+from one drawn again.
+---
+ port/hal/message_compositor.cpp | 38 +++++++++++++++++++++++++++++++++
+ port/ntr/include/ntr/ppu.h      |  3 +++
+ port/ntr/ppu_sub.cpp            |  2 ++
+ 3 files changed, 43 insertions(+)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index dae670468..a9b589b1a 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -843,6 +843,19 @@ inline bool winobj_off_env() {
+     return v != 0;
+ }
+ 
++/* THE PICTURE'S SIGNATURE (3DS lane, card3ds's overlay keep). On a frame held
++   on the card the framebuffer is the transparent fill plus the cells this unit
++   blits as spans (blit_ov_cell), in that order: so the spans themselves --
++   where, and the word -- say what the picture is, and a frame whose spans
++   are the last frame's is the last frame's picture. g_pic_sig folds them;
++   every other write this unit or its fade makes to the framebuffer clears
++   g_pic_sig_ok, and so does the card's own 2D path (TWODGPU1). The host
++   adds what is not this unit's (the fill, the frame being held, no other
++   writer) before it trusts it: port_message_composite_signature. */
++uint64_t g_pic_sig;
++bool g_pic_sig_ok;
++inline void pic_sig_add(uint32_t v) { g_pic_sig = (g_pic_sig ^ v) * 0x100000001B3ull; }
++
+ void hide_3d_outside_windows(uint32_t dispcnt, const Windows &w, ntr::Framebuffer &fb)
+ {
+     if (!w.any || hide3d_off_env() || !bg0_3d_shown(dispcnt)) return;
+@@ -865,6 +878,7 @@ void hide_3d_outside_windows(uint32_t dispcnt, const Windows &w, ntr::Framebuffe
+     }
+     const bool out_hidden = (w.out & 1u) == 0;
+     if (!any_hidden && !out_hidden) return;
++    g_pic_sig_ok = false;   /* it writes the backdrop into the picture */
+     uint8_t *const cover = const_cast<uint8_t *>(ntr::gx_coverage());
+     uint32_t *const pre = ntr::gx_aa_preimage();
+     const uint32_t bd = bgr555(rd16(kPlttBase));
+@@ -3141,6 +3155,7 @@ extern "C" void port_engine_a_fade(unsigned int *px, int w, int h)
+            144 Hz). A tick where engine A fades too keeps the settle. */
+         if (!a_on && px && bootstall_panel_on()) {
+             if (b_evy > 16) b_evy = 16;
++            g_pic_sig_ok = false;
+             fade_pass_ov(px, w, h, b_evy, b_white, g_inset_fade_rc);
+             return;
+         }
+@@ -3149,6 +3164,7 @@ extern "C" void port_engine_a_fade(unsigned int *px, int w, int h)
+     if (g_bm_card) bm_card_to_classic();
+     if (!px || (!a_on && !(inset_b && b_evy)))
+         return;
++    g_pic_sig_ok = false;   /* the processor's fade, on the picture */
+     /* ONLY THE PIXELS THE DS BLENDS: the layer on top there is one of
+        BLDCNT's first targets and its window's effect bit is set. Null when
+        every pixel qualifies (a plain fade). */
+@@ -3318,6 +3334,8 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+        frame the overlay reports as empty rather than as last frame's. Off, it
+        is one call that answers 0 and nothing else in this file changes. */
+     g_cz.begin(); g_cz.live = 0;
++    g_pic_sig = 0xCBF29CE484222325ull;
++    g_pic_sig_ok = true;
+     lc_overlay_begin();
+     g_cz.live = (lc_ov.live || lc_ov.top_live) ? 1 : 0;
+     g_cz.mark(0);
+@@ -3565,6 +3583,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+         w0.any = w0.on[0] || w0.on[1];
+         bool tw_bm0 = false;
+         const bool tw_took0 = tw_try && twod_begin(dispcnt, w0, fb, tw_bm0);
++        if (tw_took0) g_pic_sig_ok = false;
+         if (!tw_took0 || twod_check_env()) {
+             hide_3d_outside_windows(dispcnt, w0, fb);
+             if (bm_needed(w0)) bm_fill_default(dispcnt, w0);
+@@ -3589,6 +3608,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+        pass below (twod_begin); SM64DS_TWOD_CARD_CHECK also runs the loops */
+     bool tw_bm = false;
+     const bool tw_took = tw_try && twod_begin(dispcnt, win, fb, tw_bm);
++    if (tw_took) g_pic_sig_ok = false;
+     const bool tw_chk = tw_took && twod_check_env();
+     bool bm_on = false;
+     if (!tw_took || tw_chk)
+@@ -4137,6 +4157,9 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     auto span_flush = [&] {
+         if (!sp.live) return;
+         if (g_cz.on > 0) ++g_cz.spans;
++        pic_sig_add((uint32_t)sp.hx0 | (uint32_t)sp.hx1 << 16);
++        pic_sig_add((uint32_t)sp.hy0 | (uint32_t)sp.hy1 << 16);
++        pic_sig_add(sp.word);
+         blit_ov_cell(fb, sp.hx0, sp.hx1 - sp.hx0, sp.hy0, sp.hy1, sp.word, bm_on, sp.bits);
+         sp.live = false;
+     };
+@@ -4306,6 +4329,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+             }
+             if (ovl3d && lcv == 1) {
+                 span_flush();
++                g_pic_sig_ok = false;
+                 int run0 = -1;
+                 for (int hy = hy0; hy <= hy1; ++hy) {
+                     const bool inb = hy < hy1 && lc_overlay_in_band(lcow, hy);
+@@ -4383,6 +4407,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                     continue;
+                 }
+                 span_flush();
++                g_pic_sig_ok = false;
+                 for (int hy = hy0; hy < hy1; ++hy)
+                     for (int dx = 0; dx < bw; ++dx) {
+                         const int hx = hx0 + dx;
+@@ -4408,6 +4433,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                 continue;
+             }
+             span_flush();
++            g_pic_sig_ok = false;
+             for (int hy = hy0; hy < hy1; ++hy)
+                 for (int dx = 0; dx < bw; ++dx) {
+                     const int hx = hx0 + dx;
+@@ -4493,3 +4519,15 @@ extern "C" unsigned int port_engine_a_fade_px(unsigned int p, unsigned char bm)
+     }
+     return 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+ }
++
++/* THE PICTURE'S SIGNATURE, for the frame composited last (see g_pic_sig): 1 and
++   *sig when every write this unit and its fade made to the framebuffer since
++   the composite began was a span blit, else 0. Answered once: the next ask
++   without a composite in between is 0. */
++extern "C" int port_message_composite_signature(unsigned long long *sig)
++{
++    const int ok = g_pic_sig_ok ? 1 : 0;
++    g_pic_sig_ok = false;
++    if (ok && sig) *sig = g_pic_sig;
++    return ok;
++}
+diff --git a/port/ntr/include/ntr/ppu.h b/port/ntr/include/ntr/ppu.h
+index 7322498cc..74aa76d0c 100644
+--- a/port/ntr/include/ntr/ppu.h
++++ b/port/ntr/include/ntr/ppu.h
+@@ -254,6 +254,9 @@ struct SubFramebuffer {
+ // master brightness, all resolved together by priority. No BLDCNT blending, no
+ // bitmap OBJs, no bitmap BGs, no mosaic.
+ void ppu_scanout_sub(SubFramebuffer &fb);
++// How many scan-outs the unchanged-frame skip has handed back so far: each
++// one left its framebuffer holding the picture that framebuffer last got.
++long ppu_sub_scan_hits();
+ 
+ bool ppu_write_bmp_sub(const char *path, const SubFramebuffer &fb);
+ 
+diff --git a/port/ntr/ppu_sub.cpp b/port/ntr/ppu_sub.cpp
+index 8f119f61a..79e09da31 100644
+--- a/port/ntr/ppu_sub.cpp
++++ b/port/ntr/ppu_sub.cpp
+@@ -1763,6 +1763,8 @@ void twod_verify_sub(const SubFramebuffer &fb, uint32_t dispcnt,
+ 
+ }  // namespace
+ 
++long ppu_sub_scan_hits() { return g_scan_hits; }
++
+ void ppu_scanout_sub(SubFramebuffer &fb)
+ {
+     // The audit's per-frame seam. This is the one scan-out the live harness
+-- 
+2.55.0.windows.5
+

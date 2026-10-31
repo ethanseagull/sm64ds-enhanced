@@ -1,0 +1,50 @@
+From 05d8be09ec07ee84f445afa3bcfa8445840acca5 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 09:18:26 -0700
+Subject: [PATCH] ntr: the HBlank gates asked once a frame while no handler is
+ armed
+
+Only a handler runs inside run_scanlines, so a frame that starts disarmed
+stays so; the gates were asked on all 263 lines (a fifth of the boot scene's
+frame in Azahar's Old 3DS mode).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/rt.cpp | 11 ++++++++---
+ 1 file changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/port/ntr/rt.cpp b/port/ntr/rt.cpp
+index 43f01a8a1..ac235face 100644
+--- a/port/ntr/rt.cpp
++++ b/port/ntr/rt.cpp
+@@ -182,12 +182,16 @@ void run_scanlines() {
+     const bool off = hblank_off();
+     bool rows_written = false;
+     win_rows_take(0);
++    // Re-asked after every delivery: a handler may disarm itself mid-frame,
++    // and the ROM's own func_0202fb30 is exactly that. Only a handler runs
++    // inside this loop, so a frame that starts disarmed stays so (the five
++    // gates were asked on all 263 lines: ~a fifth of the boot scene's frame
++    // in Azahar, Old 3DS mode).
++    bool armed = !off && rt_hblank_armed();
+     for (uint16_t line = 0; line < 263; ++line) {
+         reg16(REG_VCOUNT) = line;
+         if (off) continue;
+-        // Re-asked every line: a handler may disarm itself mid-frame, and the
+-        // ROM's own func_0202fb30 is exactly that.
+-        if (rt_hblank_armed()) {
++        if (armed) {
+             if (!g_hb_announced) {
+                 g_hb_announced = true;
+                 std::fprintf(stderr, "[irq2] HBlank edge live: handler %p, "
+@@ -198,6 +202,7 @@ void run_scanlines() {
+             }
+             hblank_line();
+             if (line < 191) rows_written = true;
++            armed = rt_hblank_armed();
+         } else if (hblank_trace()) {
+             const unsigned g = rt_hblank_gates();
+             if (g != g_hb_gates_said && (g & HBLANK_GATE_HANDLER)) {
+-- 
+2.55.0.windows.5
+

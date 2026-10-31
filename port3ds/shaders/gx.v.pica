@@ -1,0 +1,54 @@
+; gx.v.pica -- the geometry engine's screen-space triangles to PICA clip space.
+;
+; ntr/gx.cpp hands over vertices already transformed by the DS geometry
+; engine: x, y in DS screen pixels, z in [0,1], and the clip w. The
+; projection maps DS screen space onto the 3DS top screen (rotated, see
+; gpu3ds.cpp); multiplying the result by w restores a homogeneous position,
+; so the GPU's perspective divide gives back the same point and its
+; perspective-correct interpolation of texture coordinates matches gx.cpp's
+; 1/w interpolation.
+;
+;   v0  x, y, z, w      screen-space position and clip w
+;   v1  s, t            normalized texture coordinates
+;   v2  r, g, b, a      vertex colour, 0..1 (a = polygon alpha)
+;   v3  s, t            the fog ramp's coordinate (gpu3ds.cpp, fog_stage):
+;                       the vertex's DS fog density, passed through as
+;                       texcoord2 for texture unit 2
+;
+; texcoord1 is the TOON TABLE lookup (mode-2 polygons, gpu3ds.cpp): s =
+; red * 31/32 + 1/64, so a nearest sample of the 32-texel table picks entry
+; round(red * 31) per pixel, gx.cpp's toon_index of the interpolated red.
+
+.fvec projection[4]
+.constf ones(1.0, 1.0, 1.0, 1.0)
+.constf toonmap(0.96875, 0.015625, 0.5, 0.0)
+
+.out outpos position
+.out outtc0 texcoord0
+.out outtc1 texcoord1
+.out outclr color
+.out outtc2 texcoord2
+
+.alias inpos v0
+.alias intc  v1
+.alias inclr v2
+.alias infog v3
+
+.proc main
+    mov r0.xyz, inpos
+    mov r0.w, ones
+    dp4 r1.x, projection[0], r0
+    dp4 r1.y, projection[1], r0
+    dp4 r1.z, projection[2], r0
+    dp4 r1.w, projection[3], r0
+    mul outpos, r1, inpos.wwww
+    mov outtc0, intc
+    mov r2, toonmap
+    mul r3.x, inclr.xxxx, r2.xxxx
+    add r3.x, r3.xxxx, r2.yyyy
+    mov r3.y, r2.zzzz
+    mov outtc1, r3
+    mov outclr, inclr
+    mov outtc2, infog
+    end
+.end

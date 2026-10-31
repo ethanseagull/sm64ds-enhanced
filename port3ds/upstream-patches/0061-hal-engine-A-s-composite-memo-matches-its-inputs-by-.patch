@@ -1,0 +1,136 @@
+From 8617df1fd97945e02f79a340d2fddab89cc84060 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 22:14:42 -0700
+Subject: [PATCH] hal: engine A's composite memo matches its inputs by sums
+
+The memo compared every input span (the BG maps, up to 64 KB of BG tiles a
+BG, the palettes, OAM, the OBJ tiles) byte for byte against each saved
+frame's copies, both read from memory every frame; on the 3DS port's Old
+3DS (16 KB of data cache, no L2) that is two misses a line, and the copies
+were ~100-200 KB a saved frame. Now each span is a two-lane 64-bit sum
+(memo_sum, ntr/gx.cpp lm_sum's mix), made once a frame and compared with
+each saved frame's; the bytes are kept only for SM64DS_COMPA_MEMO_WHY.
+
+The 3DS port, Azahar, Old 3DS mode, levels 1 and 6 with a scripted run
+under SM64DS_COMPA_MEMO_VERIFY: 60 of 60 matched, 0 verify misses.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 65 +++++++++++++++++++++++++++------
+ 1 file changed, 54 insertions(+), 11 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index d462d50a7..28228e20d 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -3580,8 +3580,9 @@ struct MemoFrame {
+     unsigned used;                 // g_memo.clock when last recorded or replayed
+     std::vector<uint32_t> scal;    // its scalars
+     std::vector<MemoSpan> spans;   // its memory spans, sorted and merged
+-    std::vector<size_t> offs;      // each span's offset in bytes
+-    std::vector<uint8_t> bytes;    // their contents, span after span
++    std::vector<size_t> offs;      // each span's offset in bytes (with bytes)
++    std::vector<uint8_t> bytes;    // their contents, span after span (SM64DS_COMPA_MEMO_WHY only)
++    std::vector<uint64_t> sums;    // each span's memo_sum
+     std::vector<MemoBlit> blits;   // its blit, in order
+     std::vector<uint8_t> bm;       // g_bm's rows as it left them (bm_live)
+     uint64_t sig;
+@@ -3600,6 +3601,8 @@ struct Memo {
+     unsigned cells_now, last_cells;
+     std::vector<uint32_t> cur_scal;
+     std::vector<MemoSpan> cur_spans;
++    std::vector<uint64_t> cur_sums;   // cur_spans' sums, once made this frame (sums_ok)
++    bool sums_ok;
+     std::vector<MemoBlit> cur_blits;
+ };
+ Memo g_memo;
+@@ -3710,6 +3713,31 @@ int memo_why_on()
+     return v;
+ }
+ 
++/* A SPAN AS A NUMBER, not a copy compared byte for byte: the inputs (the BG
++   tiles alone up to 64 KB a BG) were compared against each saved frame's
++   copies every frame, both read from memory, and on an Old 3DS (16 KB of data
++   cache, no L2) that is two cache misses a line; the copies were ~100-200 KB
++   a saved frame. Two 32-bit lanes of different mixes (ntr/gx.cpp lm_sum's),
++   over the span's words (every span is whole words). */
++uint64_t memo_sum(uintptr_t lo, uintptr_t hi)
++{
++    const uint32_t *p = reinterpret_cast<const uint32_t *>(lo);
++    const size_t n = (hi - lo) >> 2;
++    uint32_t a = 2166136261u, b = 0x9E3779B9u ^ (uint32_t)n;
++    for (size_t i = 0; i < n; ++i) {
++        const uint32_t w = p[i];
++        a = (a ^ w) * 16777619u;
++        b = ((b << 5) | (b >> 27)) + w * 0x9E3779B1u;
++    }
++    return (uint64_t)a << 32 | (b ^ (a >> 15));
++}
++
++void memo_sums(const std::vector<MemoSpan> &sp, std::vector<uint64_t> &out)
++{
++    out.resize(sp.size());
++    for (size_t i = 0; i < sp.size(); ++i) out[i] = memo_sum(sp[i].lo, sp[i].hi);
++}
++
+ bool memo_same(const MemoFrame &f)
+ {
+     const bool why = memo_why_on() != 0;
+@@ -3737,6 +3765,15 @@ bool memo_same(const MemoFrame &f)
+             return false;
+         }
+     }
++    if (!why || f.bytes.empty()) {
++        if (!g_memo.sums_ok) {
++            memo_sums(g_memo.cur_spans, g_memo.cur_sums);
++            g_memo.sums_ok = true;
++        }
++        if (g_memo.cur_sums == f.sums) return true;
++        if (why) std::fprintf(stderr, "[memo-why] memory: a span's sum differs\n");
++        return false;
++    }
+     /* LAST TO FIRST, as the scan cache compares: the spans are sorted by
+        address, so OAM and the OBJ tiles (what a moving sprite changes) are at
+        the end and the BG tile data in the middle; a frame that differs mostly
+@@ -3818,16 +3855,21 @@ void memo_finish()
+     f.scal.swap(g_memo.cur_scal);
+     f.spans.swap(g_memo.cur_spans);
+     f.blits.swap(g_memo.cur_blits);
+-    f.offs.resize(f.spans.size());
+-    size_t total = 0;
+-    for (size_t i = 0; i < f.spans.size(); ++i) {
+-        f.offs[i] = total;
+-        total += f.spans[i].hi - f.spans[i].lo;
++    memo_sums(f.spans, f.sums);
++    f.offs.clear();
++    f.bytes.clear();
++    if (memo_why_on()) {   // the bytes too, for [memo-why]'s first differing byte
++        f.offs.resize(f.spans.size());
++        size_t total = 0;
++        for (size_t i = 0; i < f.spans.size(); ++i) {
++            f.offs[i] = total;
++            total += f.spans[i].hi - f.spans[i].lo;
++        }
++        f.bytes.resize(total);
++        for (size_t i = 0; i < f.spans.size(); ++i)
++            std::memcpy(f.bytes.data() + f.offs[i], reinterpret_cast<const void *>(f.spans[i].lo),
++                        f.spans[i].hi - f.spans[i].lo);
+     }
+-    f.bytes.resize(total);
+-    for (size_t i = 0; i < f.spans.size(); ++i)
+-        std::memcpy(f.bytes.data() + f.offs[i], reinterpret_cast<const void *>(f.spans[i].lo),
+-                    f.spans[i].hi - f.spans[i].lo);
+     f.sig = g_pic_sig;
+     f.bm_live = g_bm_live;
+     f.bm_card = g_bm_card;
+@@ -4022,6 +4064,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+         if (g_memo.on && last >= memo_cells() && !forced_blank && !tw_try && !lc_ov.live &&
+             !lc_ov.top_live && ntr::gx_card_overlay_active() && memo_probes_off()) {
+             memo_inputs(dispcnt, g_memo.cur_scal, g_memo.cur_spans);
++            g_memo.sums_ok = false;
+             /* the most recently used saved frame first: a still screen hits it */
+             int order[kMemoFrames];
+             for (int i = 0; i < kMemoFrames; ++i) order[i] = i;
+-- 
+2.55.0.windows.5
+

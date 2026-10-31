@@ -1,0 +1,411 @@
+From 433439b2c99385d4bfa8f1ef64581941bedaf80d Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 09:18:25 -0700
+Subject: [PATCH] ntr/hal: dry frames make no vertices and light a NORMAL only
+ when it is seen
+
+A dry frame (gx_frame_dry) skipped the vertices of replayed lists only;
+every other list still recorded its vertices and lit every NORMAL. Now
+vertex() makes nothing on a dry frame, a NORMAL there is lit only before a
+command that reads or changes what it leaves (nrm_before), a dry frame keeps
+no list, and engine A's fade is not run. The game's reads stay exact (Azahar,
+levels 1, 6, 8 with GAME3DS_DRY=2: every [ltrace] line the same).
+normal_light: one divide, not three. The memos' sums (lm_sum, memo_sum) in
+three lanes: two FNV over the even and odd words, a rotate-add.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp |  25 ++-
+ port/ntr/gx.cpp                 | 264 +++++++++++++++++++-------------
+ 2 files changed, 178 insertions(+), 111 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index 28228e20d..2bd88ffd6 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -3299,8 +3299,10 @@ static int bootstall_panel_on(void)
+     return v;
+ }
+ 
++extern "C" int port_message_composite_dry;   /* below, the 3DS port's dry frames */
+ extern "C" void port_engine_a_fade(unsigned int *px, int w, int h)
+ {
++    if (port_message_composite_dry) return;   /* a dry frame: nothing is shown */
+     int evy = 0, toWhite = 0;
+     const int a_on = px && port_fader_blend_state(&evy, &toWhite);
+     if (a_on && evy > 16) evy = 16;
+@@ -3717,19 +3719,26 @@ int memo_why_on()
+    tiles alone up to 64 KB a BG) were compared against each saved frame's
+    copies every frame, both read from memory, and on an Old 3DS (16 KB of data
+    cache, no L2) that is two cache misses a line; the copies were ~100-200 KB
+-   a saved frame. Two 32-bit lanes of different mixes (ntr/gx.cpp lm_sum's),
+-   over the span's words (every span is whole words). */
++   a saved frame. ntr/gx.cpp lm_sum's three lanes over the span's words
++   (every span is whole words). */
+ uint64_t memo_sum(uintptr_t lo, uintptr_t hi)
+ {
+     const uint32_t *p = reinterpret_cast<const uint32_t *>(lo);
+     const size_t n = (hi - lo) >> 2;
+-    uint32_t a = 2166136261u, b = 0x9E3779B9u ^ (uint32_t)n;
+-    for (size_t i = 0; i < n; ++i) {
+-        const uint32_t w = p[i];
+-        a = (a ^ w) * 16777619u;
+-        b = ((b << 5) | (b >> 27)) + w * 0x9E3779B1u;
++    uint32_t a0 = 2166136261u, a1 = 0x811C9DC5u ^ 0x5bd1e995u, b = 0x9E3779B9u ^ (uint32_t)n;
++    size_t i = 0;
++    for (; i + 1 < n; i += 2) {
++        const uint32_t w0 = p[i], w1 = p[i + 1];
++        a0 = (a0 ^ w0) * 16777619u;
++        a1 = (a1 ^ w1) * 16777619u;
++        b = ((b << 5) | (b >> 27)) + w0;
++        b = ((b << 5) | (b >> 27)) + w1;
+     }
+-    return (uint64_t)a << 32 | (b ^ (a >> 15));
++    if (i < n) {
++        a0 = (a0 ^ p[i]) * 16777619u;
++        b = ((b << 5) | (b >> 27)) + p[i];
++    }
++    return (uint64_t)(a0 ^ ((a1 << 16) | (a1 >> 16))) << 32 | (b ^ a1 ^ (a0 >> 15));
+ }
+ 
+ void memo_sums(const std::vector<MemoSpan> &sp, std::vector<uint64_t> &out)
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index adee6f71b..4bc4114e4 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -353,6 +353,7 @@ void mat_note_normal(uint32_t attr) {
+     ++g_matlog_normals_other;
+ }
+ extern uint32_t g_teximage;   // defined with the texture cache below
++extern int g_lm_dry;          // gx_frame_dry, defined with the list memo below
+ 
+ /* SM64DS_FRAME_MS=1: every 30 frames, the raster's own cost on stderr --
+    average time inside gx_render, average wall interval between consecutive
+@@ -2167,7 +2168,8 @@ void push_vertex(const GxVertex &v, const GxRaw *r) {
+ 
+ void vertex(int16_t x, int16_t y, int16_t z) {
+     g.vx = x; g.vy = y; g.vz = z;
+-    if (g.prim < 0) return;
++    // a dry frame (gx_frame_dry) makes no picture: no vertex, no triangle
++    if (g.prim < 0 || g_lm_dry) return;
+     ++g_s5_frame[S5_VERTS];
+     const bool new_id = g_s5_mtx_dirty;
+     if (new_id) { ++g_s5_frame[S5_MTX]; g_s5_mtx_dirty = false; }
+@@ -2579,8 +2581,133 @@ void lm_note(uint8_t cmd, const uint32_t *p) {
+     }
+ }
+ 
++// NORMAL (0x21): the lighting of word w under the direction matrix v.
++void normal_light(uint32_t w, const Mat &v) {
++    if (mat_log()) mat_note_normal(g.poly_attr);
++    // 3 x 10-bit signed, 1.9 fixed point.
++    auto n10 = [](uint32_t x) {
++        return (static_cast<int32_t>(x << 22) >> 22) / 512.0f;
++    };
++    float nx = n10(w & 0x3FF);
++    float ny = n10((w >> 10) & 0x3FF);
++    float nz = n10((w >> 20) & 0x3FF);
++    /* texgen mode 2: normal-source (env mapping) -- offset the
++       latched texcoord by the raw normal through the tex matrix */
++    if (((g_teximage >> 30) & 3) == 2) {
++        g.u = g.raw_u + (nx * g.tex.m[0] + ny * g.tex.m[4] +
++                         nz * g.tex.m[8]) * (1.0f / 16.0f);
++        g.v = g.raw_v + (nx * g.tex.m[1] + ny * g.tex.m[5] +
++                         nz * g.tex.m[9]) * (1.0f / 16.0f);
++    }
++
++    // Normals are transformed by the directional matrix, not position.
++    const float tx = nx * v.m[0] + ny * v.m[4] + nz * v.m[8];
++    const float ty = nx * v.m[1] + ny * v.m[5] + nz * v.m[9];
++    const float tz = nx * v.m[2] + ny * v.m[6] + nz * v.m[10];
++    const float len = std::sqrt(tx * tx + ty * ty + tz * tz);
++    // one divide, not three (no divide instruction to spare on the ARM11's VFP)
++    const float inv = len > 1e-6f ? 1.0f / len : 0.0f;
++    nx = tx * inv;
++    ny = ty * inv;
++    nz = len > 1e-6f ? tz * inv : 1;
++
++    /* MDL: latch it for the smoother. Same value, same space, same
++       moment the hardware uses it: nothing below this line reads
++       these two fields, so lighting is bit-for-bit what it was. */
++    g.nrm[0] = nx; g.nrm[1] = ny; g.nrm[2] = nz;
++    g.normal_live = 1;
++    /* MDL2: and the RAW payload beside it, with the matrix generation
++       it was latched under, for the shape store (ntr/smooth.h). This
++       is the number the MODEL carries; the three floats above are
++       what one particular matrix made of it. Behind the level check,
++       so a run with the setting absent pays one compare on a
++       file-scope int and nothing else. */
++    if (smooth_lvl() > 0) {
++        mtx_gen_update();
++        g.nrm_raw = w & 0x3FFFFFFFu;
++        g.nrm_gen = g_mtx_gen;
++    }
++
++    /* WHICH LIGHTS ARE ON IS THE POLYGON'S OWN BUSINESS. GBATEK puts
++       the four light-enable flags in POLYGON_ATTR bits 0-3, so the
++       material that is latched when a NORMAL executes decides it and
++       nothing else does. The engine had no way to read them: the only
++       source of light_mask was gx_enable_lights(), which is a HARNESS
++       call -- the BMD smokes and walk_window's own level path use it
++       to stand a fixed light up in front of hand-fed geometry that
++       carries no POLYGON_ATTR at all. On the SCENE path nobody calls
++       it, so the mask stayed 0, every NORMAL fell through the loop
++       below, and the vertex colour came out as pure emission. With
++       SPE_EMI at 0 -- which is what every material in this game
++       writes -- that is black, and a fully textured, fully rasterised
++       model draws as a solid silhouette.
++
++       Measured in this tree before the change (SM64DS_MAT_LOG):
++
++         scene 390   1092 NORMALs, all under POLYGON_ATTR 001f8081
++                     (light 0 enabled), engine light_mask 0
++         level 1     1442 NORMALs, all under POLYGON_ATTR 011f8081
++                     (light 0 enabled), engine light_mask 1
++
++       and in both runs ZERO NORMALs executed under any of the
++       lights=0000 materials. So reading the bits is exactly what the
++       level path was already doing by accident and is what the scene
++       path was missing.
++
++       light_mask is OR-ed in rather than replaced because the harness
++       geometry it exists for never emits a POLYGON_ATTR: dropping it
++       would darken the smokes instead. It can only ever ADD a light,
++       so nothing that is lit today can go dark through this line. */
++    const uint32_t lmask = (g.poly_attr & 0xFu) | g.light_mask;
++    float c[3] = {g.emission[0], g.emission[1], g.emission[2]};
++    for (int i = 0; i < 4; ++i) {
++        if (!((lmask >> i) & 1)) continue;
++        const State::Light &L = g.lights[i];
++        // GBATEK: diffuse level is max(0, -dot(light_vector, normal)).
++        float d = -(L.dx * nx + L.dy * ny + L.dz * nz);
++        if (d < 0) d = 0;
++        const float lc[3] = {L.r, L.g, L.b};
++        for (int k = 0; k < 3; ++k)
++            c[k] += g.diffuse[k] * lc[k] * d + g.ambient[k] * lc[k];
++    }
++    auto ch = [](float f) {
++        const int i = static_cast<int>(f * 255.0f + 0.5f);
++        return static_cast<uint32_t>(i < 0 ? 0 : (i > 255 ? 255 : i));
++    };
++    g.color = 0xFF000000u | (ch(c[0]) << 16) | (ch(c[1]) << 8) | ch(c[2]);
++}
++
++/* A DRY FRAME'S NORMALS (gx_frame_dry). No vertex takes their colour there,
++   so a NORMAL is lit only when what it leaves can be seen: before any
++   command but those that neither read nor change its inputs (another
++   NORMAL, a vertex, a TEXCOORD, BEGIN/END, an MTX_RESTORE of the position
++   stack once the direction matrix it was under is kept), before a list's
++   key (lm_start) and at the frame's end. The colour, the normal and
++   normal_live it leaves are the ones it would have left; only the colours
++   in between, which vertices alone read, are not made. Never with texgen
++   2 (a NORMAL that moves the texcoord), SM64DS_MAT_LOG or the smoother. */
++uint32_t g_nrm_word;
++bool g_nrm_pend, g_nrm_kept;
++Mat g_nrm_vec;
++void nrm_resolve() {
++    g_nrm_pend = false;
++    normal_light(g_nrm_word, g_nrm_kept ? g_nrm_vec : g.vec);
++    g_nrm_kept = false;
++}
++inline void nrm_before(uint8_t cmd) {
++    if (cmd == 0x00 || cmd == 0x21 || cmd == 0x22 || (cmd >= 0x23 && cmd <= 0x28) ||
++        cmd == 0x40 || cmd == 0x41)
++        return;
++    if (cmd == 0x14 && (g.mode == MTX_POS || g.mode == MTX_POSVEC)) {
++        if (!g_nrm_kept) { g_nrm_vec = g.vec; g_nrm_kept = true; }
++        return;
++    }
++    nrm_resolve();
++}
++
+ void exec(uint8_t cmd, const uint32_t *p, int np) {
+     (void)np;
++    if (g_nrm_pend) nrm_before(cmd);
+     if (g_ip_rec) ip_push(IPK_CMD, cmd, np, p);
+     if (g_lm.on) lm_note(cmd, p);
+     if ((unsigned)(cmd - 0x16) <= 6u && g_rec.on) rec_cmd(cmd);
+@@ -2683,100 +2810,16 @@ void exec(uint8_t cmd, const uint32_t *p, int np) {
+             g.color = bgr555_to_argb(static_cast<uint16_t>(p[0] & 0x7FFF));
+             g.normal_live = 0;   /* MDL: colour set by hand, not by lighting */
+             break;
+-        case 0x21: {                                             // NORMAL
+-            if (mat_log()) mat_note_normal(g.poly_attr);
+-            // 3 x 10-bit signed, 1.9 fixed point.
+-            auto n10 = [](uint32_t v) {
+-                return (static_cast<int32_t>(v << 22) >> 22) / 512.0f;
+-            };
+-            float nx = n10(p[0] & 0x3FF);
+-            float ny = n10((p[0] >> 10) & 0x3FF);
+-            float nz = n10((p[0] >> 20) & 0x3FF);
+-            /* texgen mode 2: normal-source (env mapping) -- offset the
+-               latched texcoord by the raw normal through the tex matrix */
+-            if (((g_teximage >> 30) & 3) == 2) {
+-                g.u = g.raw_u + (nx * g.tex.m[0] + ny * g.tex.m[4] +
+-                                 nz * g.tex.m[8]) * (1.0f / 16.0f);
+-                g.v = g.raw_v + (nx * g.tex.m[1] + ny * g.tex.m[5] +
+-                                 nz * g.tex.m[9]) * (1.0f / 16.0f);
+-            }
+-
+-            // Normals are transformed by the directional matrix, not position.
+-            const Mat &v = g.vec;
+-            const float tx = nx * v.m[0] + ny * v.m[4] + nz * v.m[8];
+-            const float ty = nx * v.m[1] + ny * v.m[5] + nz * v.m[9];
+-            const float tz = nx * v.m[2] + ny * v.m[6] + nz * v.m[10];
+-            const float len = std::sqrt(tx * tx + ty * ty + tz * tz);
+-            nx = len > 1e-6f ? tx / len : 0;
+-            ny = len > 1e-6f ? ty / len : 0;
+-            nz = len > 1e-6f ? tz / len : 1;
+-
+-            /* MDL: latch it for the smoother. Same value, same space, same
+-               moment the hardware uses it: nothing below this line reads
+-               these two fields, so lighting is bit-for-bit what it was. */
+-            g.nrm[0] = nx; g.nrm[1] = ny; g.nrm[2] = nz;
+-            g.normal_live = 1;
+-            /* MDL2: and the RAW payload beside it, with the matrix generation
+-               it was latched under, for the shape store (ntr/smooth.h). This
+-               is the number the MODEL carries; the three floats above are
+-               what one particular matrix made of it. Behind the level check,
+-               so a run with the setting absent pays one compare on a
+-               file-scope int and nothing else. */
+-            if (smooth_lvl() > 0) {
+-                mtx_gen_update();
+-                g.nrm_raw = p[0] & 0x3FFFFFFFu;
+-                g.nrm_gen = g_mtx_gen;
+-            }
+-
+-            /* WHICH LIGHTS ARE ON IS THE POLYGON'S OWN BUSINESS. GBATEK puts
+-               the four light-enable flags in POLYGON_ATTR bits 0-3, so the
+-               material that is latched when a NORMAL executes decides it and
+-               nothing else does. The engine had no way to read them: the only
+-               source of light_mask was gx_enable_lights(), which is a HARNESS
+-               call -- the BMD smokes and walk_window's own level path use it
+-               to stand a fixed light up in front of hand-fed geometry that
+-               carries no POLYGON_ATTR at all. On the SCENE path nobody calls
+-               it, so the mask stayed 0, every NORMAL fell through the loop
+-               below, and the vertex colour came out as pure emission. With
+-               SPE_EMI at 0 -- which is what every material in this game
+-               writes -- that is black, and a fully textured, fully rasterised
+-               model draws as a solid silhouette.
+-
+-               Measured in this tree before the change (SM64DS_MAT_LOG):
+-
+-                 scene 390   1092 NORMALs, all under POLYGON_ATTR 001f8081
+-                             (light 0 enabled), engine light_mask 0
+-                 level 1     1442 NORMALs, all under POLYGON_ATTR 011f8081
+-                             (light 0 enabled), engine light_mask 1
+-
+-               and in both runs ZERO NORMALs executed under any of the
+-               lights=0000 materials. So reading the bits is exactly what the
+-               level path was already doing by accident and is what the scene
+-               path was missing.
+-
+-               light_mask is OR-ed in rather than replaced because the harness
+-               geometry it exists for never emits a POLYGON_ATTR: dropping it
+-               would darken the smokes instead. It can only ever ADD a light,
+-               so nothing that is lit today can go dark through this line. */
+-            const uint32_t lmask = (g.poly_attr & 0xFu) | g.light_mask;
+-            float c[3] = {g.emission[0], g.emission[1], g.emission[2]};
+-            for (int i = 0; i < 4; ++i) {
+-                if (!((lmask >> i) & 1)) continue;
+-                const State::Light &L = g.lights[i];
+-                // GBATEK: diffuse level is max(0, -dot(light_vector, normal)).
+-                float d = -(L.dx * nx + L.dy * ny + L.dz * nz);
+-                if (d < 0) d = 0;
+-                const float lc[3] = {L.r, L.g, L.b};
+-                for (int k = 0; k < 3; ++k)
+-                    c[k] += g.diffuse[k] * lc[k] * d + g.ambient[k] * lc[k];
++        case 0x21:                                               // NORMAL
++            if (g_lm_dry && ((g_teximage >> 30) & 3) != 2 && !mat_log() && smooth_lvl() <= 0) {
++                g_nrm_pend = true;   // lit when it can be seen (nrm_before)
++                g_nrm_kept = false;
++                g_nrm_word = p[0];
++                break;
+             }
+-            auto ch = [](float f) {
+-                const int i = static_cast<int>(f * 255.0f + 0.5f);
+-                return static_cast<uint32_t>(i < 0 ? 0 : (i > 255 ? 255 : i));
+-            };
+-            g.color = 0xFF000000u | (ch(c[0]) << 16) | (ch(c[1]) << 8) | ch(c[2]);
++            g_nrm_pend = g_nrm_kept = false;   // this one overwrites all it left
++            normal_light(p[0], g.vec);
+             break;
+-        }
+         case 0x22:                                               // TEXCOORD (1.4 fx)
+             g.raw_u = static_cast<int16_t>(p[0] & 0xFFFF) / 16.0f;
+             g.raw_v = static_cast<int16_t>(p[0] >> 16) / 16.0f;
+@@ -3514,17 +3557,26 @@ std::unordered_map<const uint32_t *, LmEntry> g_lm_map;
+ /* A LIST'S WORDS AS A NUMBER, not a copy compared word for word: the memo
+    compared ~16,000 words a course frame against copies of every list (~0.5 MB
+    of heap), reading both from memory each frame, which on an Old 3DS (16 KB
+-   of data cache, no L2) is two cache misses a line. Two 32-bit lanes of
+-   different mixes, so a change anywhere in a list changes both: FNV-1a's
+-   multiply, and a rotate-add of the word times the golden ratio. */
++   of data cache, no L2) is two cache misses a line. Three 32-bit lanes:
++   FNV-1a over the even words and over the odd ones (two multiplies that do
++   not wait on each other), and a rotate-add over every word. Each lane's
++   step is a bijection of its state, so a list that differs in one word
++   differs in its sum. */
+ inline uint64_t lm_sum(const uint32_t *src, int n) {
+-    uint32_t a = 2166136261u, b = 0x9E3779B9u ^ (uint32_t)n;
+-    for (int i = 0; i < n; ++i) {
+-        const uint32_t w = src[i];
+-        a = (a ^ w) * 16777619u;
+-        b = ((b << 5) | (b >> 27)) + w * 0x9E3779B1u;
++    uint32_t a0 = 2166136261u, a1 = 0x811C9DC5u ^ 0x5bd1e995u, b = 0x9E3779B9u ^ (uint32_t)n;
++    int i = 0;
++    for (; i + 1 < n; i += 2) {
++        const uint32_t w0 = src[i], w1 = src[i + 1];
++        a0 = (a0 ^ w0) * 16777619u;
++        a1 = (a1 ^ w1) * 16777619u;
++        b = ((b << 5) | (b >> 27)) + w0;
++        b = ((b << 5) | (b >> 27)) + w1;
++    }
++    if (i < n) {
++        a0 = (a0 ^ src[i]) * 16777619u;
++        b = ((b << 5) | (b >> 27)) + src[i];
+     }
+-    return (uint64_t)a << 32 | (b ^ (a >> 15));
++    return (uint64_t)(a0 ^ ((a1 << 16) | (a1 >> 16))) << 32 | (b ^ a1 ^ (a0 >> 15));
+ }
+ 
+ inline void lm_put_words(std::vector<uint32_t> &k, const void *p, size_t bytes) {
+@@ -3941,6 +3993,7 @@ int lm_start(const uint32_t *src, int n) {
+         ++g_lm_why[LMW_OTHER];
+         return 0;
+     }
++    if (g_nrm_pend) nrm_resolve();   // the key may read what it leaves
+     ++g_lm_lists;
+     if (g_lm_map.size() > 4096) g_lm_map.clear();
+     LmEntry &e = g_lm_map[src];
+@@ -3965,6 +4018,7 @@ int lm_start(const uint32_t *src, int n) {
+         if (e.misses < 255) ++e.misses;
+     }
+     if (same && !e.ok && e.tries >= 2) { ++g_lm_why[LMW_SKIP]; return 0; }   // not a list it replays
++    if (g_lm_dry) return 0;   // a dry frame keeps nothing: it makes no vertices
+     ++g_lm_why[LMW_KEEP];
+     if (!same) e.tries = 0;
+     lm_cap_begin(e, src, n, sum);
+@@ -3978,7 +4032,10 @@ void gx_list_memo(int mode) {
+     g_lm_map.clear();
+ }
+ 
+-void gx_frame_dry(int on) { g_lm_dry = on ? 1 : 0; }
++void gx_frame_dry(int on) {
++    if (g_nrm_pend) nrm_resolve();
++    g_lm_dry = on ? 1 : 0;
++}
+ 
+ void gx_list_memo_report() {
+     static const char *const names[LMW_N] = {"short", "no-record", "mid-command", "other",
+@@ -4299,6 +4356,7 @@ static void smooth_trihash_frame() {
+ }
+ 
+ void gx_reset() {
++    if (g_nrm_pend) nrm_resolve();   // a dry frame's last NORMAL (exec)
+     lm_frame_reset();
+     per_frame_answers_reset();
+     for (int i = 0; i < S5_N; ++i) {
+-- 
+2.55.0.windows.5
+

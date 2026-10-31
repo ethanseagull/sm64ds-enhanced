@@ -1,0 +1,143 @@
+From 7cddbc4a2d6d392820aff5321771f3c2d99afe4a Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 10:51:38 -0700
+Subject: [PATCH] hal/sdat: the channels summed wide and clipped once; each
+ sample held, not interpolated
+
+Two ways the mixer differed from the DS's. It clipped the running sum to
+16 bits after every channel, where the DS adds the channels' products at
+full precision and clips only its output; and it interpolated each voice
+linearly between samples, where the DS's channels hold their current sample
+until the timer steps (interpolation in DS emulators is an enhancement, off
+by default). The interpolation is a gentle low-pass: on a 3DS capture of
+Mario's punches it took ~5 dB of high-frequency energy (second difference)
+out of the mix, which a player heard as duller than the cartridge.
+
+Now the channels accumulate in 32 bits, the host volume applies to that sum
+and the clip comes last; samples are held. SM64DS_MIX_CLIP_EACH=1 and
+SM64DS_MIX_INTERP=linear put the old behaviours back. The mixer's header
+claim that the DS interpolates is corrected.
+---
+ port/hal/sdat/mixer.cpp | 75 +++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 68 insertions(+), 7 deletions(-)
+
+diff --git a/port/hal/sdat/mixer.cpp b/port/hal/sdat/mixer.cpp
+index 5d08b2c76..cc11e8f2a 100644
+--- a/port/hal/sdat/mixer.cpp
++++ b/port/hal/sdat/mixer.cpp
+@@ -8,8 +8,9 @@
+ // ARM7's square-law one (sd_cnv_vol in sdat.cpp has the address and the
+ // check against the cartridge).
+ //
+-// Resampling is linear interpolation. The DS does the same thing in
+-// hardware, so this is not a shortcut.
++// Resampling holds each sample until the voice steps to the next, as the DS's
++// channels do (no interpolation; SM64DS_MIX_INTERP=linear interpolates, the
++// old behaviour, which dulled the highs: see sd_mix_render).
+ //
+ // This file also owns the 192 Hz sequencer clock: sd_mix_render slices its
+ // output at 192 Hz boundaries and ticks the sequencer and every envelope
+@@ -716,9 +717,55 @@ void sd_mix_frame(void)
+ 
+ void sd_seq_frame(void);   // forward: the sequencer shares this clock
+ 
++/* THE CHANNELS ARE SUMMED WIDE AND CLIPPED ONCE, at the output, as the DS's
++   mixer does (GBATEK: the channels' products are added at full precision and
++   only the mixer's output is clipped to the DAC's range). This loop used to
++   clip the running sum to 16 bits after every channel, so a loud voice over
++   loud music lost its peaks partway and a later channel of the other sign
++   could not bring them back. SM64DS_MIX_CLIP_EACH=1 puts that back (an A/B).
++
++   AND EACH SAMPLE IS HELD, NOT INTERPOLATED. The DS's channels output their
++   current sample until the channel timer steps to the next (melonDS and
++   GBATEK agree; interpolation in DS emulators is an enhancement, off by
++   default). The linear interpolation this used to do is a gentle low-pass:
++   low-rate samples such as Mario's voice lost their top end and sounded
++   duller than on the cartridge. SM64DS_MIX_INTERP=linear puts it back. */
++static int mix_clip_each()
++{
++    static int v = -1;
++    if (v < 0) {
++        const char *e = getenv("SM64DS_MIX_CLIP_EACH");
++        v = (e && *e && *e != '0') ? 1 : 0;
++    }
++    return v;
++}
++
++static int mix_interp_linear()
++{
++    static int v = -1;
++    if (v < 0) {
++        const char *e = getenv("SM64DS_MIX_INTERP");
++        v = (e && strcmp(e, "linear") == 0) ? 1 : 0;
++    }
++    return v;
++}
++
+ void sd_mix_render(sd_s16 *dst, int frames)
+ {
+     memset(dst, 0, (size_t)frames * 2 * sizeof(sd_s16));
++    static sd_s32 *acc;
++    static int acc_cap;
++    const int clip_each = mix_clip_each();
++    const int linear = mix_interp_linear();
++    if (!clip_each) {
++        if (frames > acc_cap) {
++            free(acc);
++            acc = (sd_s32 *)malloc((size_t)frames * 2 * sizeof(sd_s32));
++            acc_cap = acc ? frames : 0;
++        }
++        if (acc) memset(acc, 0, (size_t)frames * 2 * sizeof(sd_s32));
++    }
++    const int wide = !clip_each && acc;
+     int done = 0;
+     while (done < frames) {
+         // Frames remaining before the next 192 Hz boundary.
+@@ -742,6 +789,7 @@ void sd_mix_render(sd_s16 *dst, int frames)
+             double gr = g * pan / 127.0;
+ 
+             sd_s16 *o = dst + (done * 2);
++            sd_s32 *w = wide ? acc + (done * 2) : nullptr;
+             for (int k = 0; k < n; k++, o += 2) {
+                 sd_u32 idx = (sd_u32)c.pos;
+                 if (idx >= c.total) {
+@@ -762,11 +810,17 @@ void sd_mix_render(sd_s16 *dst, int frames)
+                 sd_s32 a = c.pcm[idx];
+                 sd_s32 b = (idx + 1 < c.total) ? c.pcm[idx + 1]
+                          : (c.loop ? c.pcm[c.loopStart] : a);
+-                double s = c.hold ? (double)a : a + (b - a) * frac;
+-                sd_s32 l = (sd_s32)(o[0] + s * gl);
+-                sd_s32 r = (sd_s32)(o[1] + s * gr);
+-                o[0] = (sd_s16)(l < -32768 ? -32768 : (l > 32767 ? 32767 : l));
+-                o[1] = (sd_s16)(r < -32768 ? -32768 : (r > 32767 ? 32767 : r));
++                double s = (c.hold || !linear) ? (double)a : a + (b - a) * frac;
++                if (w) {
++                    w[0] += (sd_s32)(s * gl);
++                    w[1] += (sd_s32)(s * gr);
++                    w += 2;
++                } else {
++                    sd_s32 l = (sd_s32)(o[0] + s * gl);
++                    sd_s32 r = (sd_s32)(o[1] + s * gr);
++                    o[0] = (sd_s16)(l < -32768 ? -32768 : (l > 32767 ? 32767 : l));
++                    o[1] = (sd_s16)(r < -32768 ? -32768 : (r > 32767 ? 32767 : r));
++                }
+                 c.pos += c.step;
+             }
+         }
+@@ -786,6 +840,13 @@ void sd_mix_render(sd_s16 *dst, int frames)
+     // the way out (and so the .wav dump and the device hear the same level).
+     // pct == 100 is a no-op fast path; pct == 0 zeroes (the old muted case).
+     int pct = g_host_mute ? 0 : out_volume_pct();
++    if (wide) {   /* the volume on the wide sum, then the one clip */
++        for (int i = 0; i < frames * 2; i++) {
++            sd_s32 s = pct == 100 ? acc[i] : acc[i] / 100 * pct + acc[i] % 100 * pct / 100;
++            dst[i] = (sd_s16)(s < -32768 ? -32768 : (s > 32767 ? 32767 : s));
++        }
++        pct = 100;   /* applied */
++    }
+     if (pct != 100) {
+         /* 32-bit: |sample| * 100 fits easily, and a 64-bit divide is a library
+            call per sample on ARM (the 3DS) */
+-- 
+2.55.0.windows.5
+

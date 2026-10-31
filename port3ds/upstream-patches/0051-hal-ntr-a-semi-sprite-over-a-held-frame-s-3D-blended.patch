@@ -1,0 +1,380 @@
+From d8fe94ba4ecbf012d38b63f9a5e6c9fb916cbb60 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 19:52:35 -0700
+Subject: [PATCH] hal/ntr: a semi sprite over a held frame's 3D blended by the
+ card; the HUD's elements from row runs
+
+The cannon's aiming view blends its sprites over the 3D (BLDALPHA 12/6)
+every frame, and each blend read the held frame back first ("a sprite
+blended over the 3D"): 35-45 ms a frame on the 3DS. A host whose card says
+it can (gx_card_set_blend_ok) now gets the sprite's share as a GX_OV_BLEND
+word (alpha 1..0xEF, premultiplied) and adds the 3D pixel's share itself; a
+frame settled later resolves the word on the processor, and the memo keeps
+the frame's flag. A sprite behind the 3D layer still settles.
+
+Koopa the Quick's race shows HUD::RenderTimeTimer, whose digits change every
+frame, so hudelem::resolve relabelled the HUD each frame (5.7 ms in Azahar).
+resolve_runs makes the same elements from row intervals: the same partition
+and anchors (SM64DS_HUD_RUNS_VERIFY=1: 600 relabelled frames, none differ),
+1.3 ms. SM64DS_HUD_RUNS=0 puts the per-pixel passes back.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 195 +++++++++++++++++++++++++++++++-
+ port/ntr/gx.cpp                 |   8 ++
+ port/ntr/include/ntr/gx.h       |  37 ++++++
+ 3 files changed, 236 insertions(+), 4 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index 6485ed907..5ee989195 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -1330,6 +1330,126 @@ void unite(int a, int b) {
+     if (a != b) g_par[a > b ? a : b] = (a < b) ? a : b;
+ }
+ 
++// SM64DS_HUD_RUNS=0: the per-pixel passes below instead of resolve_runs;
++// SM64DS_HUD_RUNS_VERIFY=1: both, the labels compared (a line every 120
++// relabelled frames).
++bool runs_off()
++{
++    static int v = -1;
++    if (v < 0) { const char *e = std::getenv("SM64DS_HUD_RUNS"); v = (e && *e == '0') ? 1 : 0; }
++    return v != 0;
++}
++bool runs_verify()
++{
++    static int v = -1;
++    if (v < 0) { const char *e = std::getenv("SM64DS_HUD_RUNS_VERIFY"); v = (e && *e && *e != '0') ? 1 : 0; }
++    return v != 0;
++}
++
++// THE SAME ELEMENTS FROM ROW RUNS (3DS lane). The per-pixel passes below cost
++// the 3DS 5-6 ms a frame whenever the marks change, and Koopa the Quick's race
++// changes them every frame (HUD::RenderTimeTimer's digits). Every step of them
++// is a statement about intervals of a row, so this makes it with intervals:
++//   the horizontal dilation of a run of marks [a, b] is [a - kBridgeX,
++//   b + kBridgeX]; a row's dilated mask is the union of those of the marked
++//   rows within kBridgeY of it (the vertical pass reads the horizontal one's
++//   snapshot, so the dilation is that rectangle); two runs of adjacent rows
++//   are 8-connected when they overlap with a column to spare; an element's
++//   extent is its runs' first and last marks. g_lbl gets every dilated pixel
++//   its element's label, as the passes leave it, and g_off the same anchors:
++//   the same partition and offsets, with other label numbers. A row holds at
++//   most 8 dilated runs (each is 2 * kBridgeX + 1 wide); kRunMax bounds them
++//   and the runs of marks.
++void resolve_runs(int band_l, int band_r, int margin, int ylo, int yhi, const bool *marked,
++                  const bool *near, const uint32_t *hitg, uint8_t (*on)[256], bool *lbl_set)
++{
++    const int kRunMax = 128;
++    struct Run { int16_t lo, hi; };
++    static Run mk[192][kRunMax], hd[192][16], dr[192][16];
++    static int nmk[192], nhd[192], ndr[192], dlab[192][16];
++    for (int y = ylo; y <= yhi; ++y) {
++        nmk[y] = nhd[y] = ndr[y] = 0;
++        if (!marked[y]) continue;
++        int a = -1;
++        for (int g = 0; g < 32; ++g) {
++            if (!((hitg[y] >> g) & 1u)) {
++                if (a >= 0) { if (nmk[y] < kRunMax) mk[y][nmk[y]++] = Run{(int16_t)a, (int16_t)(g * 8 - 1)}; a = -1; }
++                continue;
++            }
++            for (int x = g * 8; x < g * 8 + 8; ++x) {
++                if (on[y][x]) { if (a < 0) a = x; continue; }
++                if (a >= 0) { if (nmk[y] < kRunMax) mk[y][nmk[y]++] = Run{(int16_t)a, (int16_t)(x - 1)}; a = -1; }
++            }
++        }
++        if (a >= 0 && nmk[y] < kRunMax) mk[y][nmk[y]++] = Run{(int16_t)a, 255};
++        for (int i = 0; i < nmk[y]; ++i) {
++            const int lo = mk[y][i].lo - kBridgeX < 0 ? 0 : mk[y][i].lo - kBridgeX;
++            const int hi = mk[y][i].hi + kBridgeX > 255 ? 255 : mk[y][i].hi + kBridgeX;
++            if (nhd[y] && lo <= hd[y][nhd[y] - 1].hi + 1) {
++                if (hi > hd[y][nhd[y] - 1].hi) hd[y][nhd[y] - 1].hi = (int16_t)hi;
++            } else if (nhd[y] < 16) {
++                hd[y][nhd[y]++] = Run{(int16_t)lo, (int16_t)hi};
++            }
++        }
++    }
++    g_nlab = 1;
++    g_par[0] = 0;
++    for (int y = ylo; y <= yhi; ++y) {
++        if (!near[y]) continue;
++        // the vertical dilation: the union of the horizontal runs within reach
++        uint8_t cov[257];
++        std::memset(cov, 0, sizeof cov);
++        for (int d = -kBridgeY; d <= kBridgeY; ++d) {
++            const int s = y + d;
++            if (s < ylo || s > yhi || !marked[s]) continue;
++            for (int i = 0; i < nhd[s]; ++i)
++                std::memset(cov + hd[s][i].lo, 1, (size_t)(hd[s][i].hi - hd[s][i].lo + 1));
++        }
++        for (int x = 0, a = -1; x <= 256; ++x) {
++            if (x < 256 && cov[x]) { if (a < 0) a = x; continue; }
++            if (a >= 0 && ndr[y] < 16) dr[y][ndr[y]++] = Run{(int16_t)a, (int16_t)(x - 1)};
++            a = -1;
++        }
++        // the labels: a run touching one of the row above (8-connected) joins it
++        const bool above = y > ylo && near[y - 1];
++        for (int i = 0; i < ndr[y]; ++i) {
++            int best = 0;
++            if (above)
++                for (int k = 0; k < ndr[y - 1]; ++k) {
++                    if (dr[y - 1][k].lo > dr[y][i].hi + 1 || dr[y - 1][k].hi < dr[y][i].lo - 1) continue;
++                    if (!best) best = dlab[y - 1][k]; else unite(best, dlab[y - 1][k]);
++                }
++            if (!best) {
++                if (g_nlab < kMaxLabels) { best = g_nlab; g_par[best] = best; ++g_nlab; }
++                else best = kMaxLabels - 1;
++            }
++            dlab[y][i] = best;
++        }
++    }
++    static int x0[kMaxLabels], x1[kMaxLabels];
++    for (int i = 0; i < g_nlab; ++i) { x0[i] = 256; x1[i] = -1; }
++    for (int y = ylo; y <= yhi; ++y) {
++        if (!near[y]) continue;
++        std::memset(g_lbl[y], 0, sizeof g_lbl[y]);
++        lbl_set[y] = true;
++        for (int i = 0, m = 0; i < ndr[y]; ++i) {
++            const int rt = find_root(dlab[y][i]);
++            for (int x = dr[y][i].lo; x <= dr[y][i].hi; ++x) g_lbl[y][x] = (int16_t)rt;
++            // the row's marks lie inside its dilated runs, in order
++            for (; m < nmk[y] && mk[y][m].lo <= dr[y][i].hi; ++m) {
++                if (mk[y][m].lo < x0[rt]) x0[rt] = mk[y][m].lo;
++                if (mk[y][m].hi > x1[rt]) x1[rt] = mk[y][m].hi;
++            }
++        }
++    }
++    g_off[0] = margin / 2;
++    for (int i = 1; i < g_nlab; ++i) {
++        if (x1[i] < 0) { g_off[i] = margin / 2; continue; }
++        const int c = (x0[i] + x1[i]) / 2;
++        g_off[i] = (c < band_l) ? 0 : (c >= band_r) ? margin : margin / 2;
++    }
++}
++
+ // Label the frame's elements and resolve each one's anchor offset.
+ //
+ // BG3 is excluded from the mask because the message layer has its own placement
+@@ -1417,6 +1537,46 @@ void resolve(int band_l, int band_r, int margin)
+     }
+     for (int y = 0; y < 192; ++y)
+         if (!near[y] && lbl_set[y]) { std::memset(g_lbl[y], 0, sizeof g_lbl[y]); lbl_set[y] = false; }
++    static int16_t v_lbl[192][256], v_off[192][256];
++    const bool verify = !runs_off() && runs_verify();
++    if (!runs_off()) {
++        resolve_runs(band_l, band_r, margin, ylo, yhi, marked, near, hitg, on, lbl_set);
++        if (!verify) return;
++        for (int y = ylo; y <= yhi; ++y)
++            for (int x = 0; x < 256; ++x) {
++                v_lbl[y][x] = g_lbl[y][x];
++                v_off[y][x] = (int16_t)g_off[g_lbl[y][x]];
++            }
++    }
++    struct VerifyAfter {   // the passes' labels against resolve_runs' (SM64DS_HUD_RUNS_VERIFY)
++        bool on;
++        int ylo, yhi;
++        ~VerifyAfter()
++        {
++            if (!on) return;
++            static unsigned frames, bad_px, bad_frames;
++            static int fwd[kMaxLabels], back[kMaxLabels];
++            for (int i = 0; i < kMaxLabels; ++i) fwd[i] = back[i] = -1;
++            unsigned bad = 0;
++            for (int y = ylo; y <= yhi; ++y)
++                for (int x = 0; x < 256; ++x) {
++                    const int a = v_lbl[y][x], b = g_lbl[y][x];
++                    bool ok = (a == 0) == (b == 0) && (!b || v_off[y][x] == g_off[b]);
++                    if (ok && a) {
++                        if (fwd[a] < 0) fwd[a] = b;
++                        if (back[b] < 0) back[b] = a;
++                        ok = fwd[a] == b && back[b] == a;
++                    }
++                    if (!ok) ++bad;
++                }
++            ++frames;
++            bad_px += bad;
++            if (bad) ++bad_frames;
++            if (frames % 120 == 0)
++                std::fprintf(stderr, "[hud-runs] %u relabelled frames: %u differ from the passes "
++                             "(%u pixels)\n", frames, bad_frames, bad_px);
++        }
++    } verify_after{verify, ylo, yhi};
+     // The groups each pass can touch: a marked row's hit groups widened two
+     // either way (horizontal), then that over kBridgeY rows up and down.
+     uint32_t hreach[192], reach[192];
+@@ -2042,6 +2202,10 @@ void arrow_capture(int px, int py, uint32_t color)
+     if (py > g_arrow_y1) g_arrow_y1 = py;
+ }
+ 
++/* this frame wrote a GX_OV_BLEND cell (raster_obj): g_memo keeps it with the
++   frame, so a replay tells the card again */
++bool g_memo_blend_now;
++
+ void raster_obj(uint32_t dispcnt, const Blend &bl, const Windows &win,
+                 ntr::Framebuffer &fb) {
+     static const int kSizes[3][4][2] = {
+@@ -2423,6 +2587,19 @@ void raster_obj(uint32_t dispcnt, const Blend &bl, const Windows &win,
+                         if (bl.second & (1u << g_a[py][px].owner))
+                             color = blend_alpha(color, g_a[py][px].color,
+                                                 bl.eva, bl.evb);
++                    } else if ((bl.second & 1u) && ntr::gx_card_blend_ok() &&
++                               !(bg0_3d_shown(dispcnt) && !prio3d_off_env() &&
++                                 layer_behind_3d(kOwnerObj, prio, bg0_3d_priority()))) {
++                        /* A FRAME HELD ON A CARD THAT BLENDS (ntr/gx.h,
++                           GX_OV_BLEND): the sprite's share goes down as the
++                           word, the card adds the 3D pixel's. The cannon's
++                           aiming view is this every frame: its sprites blend
++                           over the 3D, and the settle that read the picture
++                           back cost the 3DS 35-45 ms a frame. A sprite behind
++                           the 3D layer still settles below. */
++                        color = ntr::gx_ov_blend_word(color, bl.eva, bl.evb);
++                        ntr::gx_card_note_blend();
++                        g_memo_blend_now = true;
+                     } else if (bl.second & 1u) {   // BG0 (3D) is a 2nd target
+                         /* THIS BLEND READS A 3D PIXEL, one per DS pixel, at the
+                            block's top-left corner: a frame held on the graphics
+@@ -3391,7 +3568,7 @@ struct MemoFrame {
+     std::vector<MemoBlit> blits;   // its blit, in order
+     std::vector<uint8_t> bm;       // g_bm's rows as it left them (bm_live)
+     uint64_t sig;
+-    bool bm_live, bm_card, bm_shown3d, bm_clear_opaque, behind;
++    bool bm_live, bm_card, bm_shown3d, bm_clear_opaque, behind, blend;
+     uint32_t kept3d, buried3d;
+     unsigned cells;                // its blit cells
+ };
+@@ -3580,6 +3757,7 @@ void memo_replay(ntr::Framebuffer &fb, MemoFrame &f)
+     g_bm_clear_opaque = f.bm_clear_opaque;
+     if (f.bm_live && g_bm) std::memcpy(g_bm, f.bm.data(), f.bm.size());
+     if (f.behind) ntr::gx_card_note_behind();
++    if (f.blend) ntr::gx_card_note_blend();
+     g_kept3d = f.kept3d;
+     g_buried3d = f.buried3d;
+     g_pic_sig = f.sig;
+@@ -3601,7 +3779,8 @@ void memo_finish()
+         const bool same = g_pic_sig_ok && g_pic_sig == f.sig && g_bm_live == f.bm_live &&
+                           g_bm_card == f.bm_card && g_bm_shown3d == f.bm_shown3d &&
+                           g_bm_clear_opaque == f.bm_clear_opaque &&
+-                          g_memo.behind_now == f.behind && g_kept3d == f.kept3d &&
++                          g_memo.behind_now == f.behind && g_memo_blend_now == f.blend &&
++                          g_kept3d == f.kept3d &&
+                           g_buried3d == f.buried3d &&
+                           (!g_bm_live || (g_bm && f.bm.size() == bm_len &&
+                                           std::memcmp(g_bm, f.bm.data(), bm_len) == 0));
+@@ -3639,6 +3818,7 @@ void memo_finish()
+     f.bm_clear_opaque = g_bm_clear_opaque;
+     if (g_bm_live) f.bm.assign(g_bm, g_bm + bm_len);
+     f.behind = g_memo.behind_now;
++    f.blend = g_memo_blend_now;
+     f.kept3d = g_kept3d;
+     f.buried3d = g_buried3d;
+     f.cells = g_memo.cells_now;
+@@ -3806,7 +3986,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     {
+         const unsigned last = g_memo.last_cells;
+         g_memo.last_cells = 0;
+-        g_memo.rec = g_memo.behind_now = false;
++        g_memo.rec = g_memo.behind_now = g_memo_blend_now = false;
+         g_memo.would = -1;
+         g_memo.cells_now = 0;
+         g_memo.cur_blits.clear();
+@@ -4773,7 +4953,8 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                 /* the owning 2D layer is in FRONT of the 3D layer (or there is
+                    no 3D layer in the picture): the old unconditional write */
+                 if (ovl3d) {
+-                    const uint32_t word = (c & 0x00FFFFFFu) | (GX_OV_FRONT << 24);
++                    const uint32_t word = ntr::gx_ov_is_blend(c)   /* raster_obj's GX_OV_BLEND, as it is */
++                        ? c : (c & 0x00FFFFFFu) | (GX_OV_FRONT << 24);
+                     const unsigned char bits = (unsigned char)((bmv ? 4u : 0u) | 8u);
+                     span_cell(hx0, bw, hy0, hy1, word, bits);
+                     f_note(pass, x, gc, hx0, word, bits);
+@@ -4787,6 +4968,12 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                         if (cover && cover[hy * ntr::SCREEN_W + hx]) ++buried;
+                         if (lcv && lc_overlay_in_band(lcow, hy)) {
+                             lc_ov.col[(size_t)hy * ntr::SCREEN_W + hx] = c | 0xff000000u;
++                        } else if (ntr::gx_ov_is_blend(c)) {
++                            /* a GX_OV_BLEND cell of a frame settled after
++                               raster_obj: the 3D is in fb now */
++                            fb.px[hy][hx] = ntr::gx_ov_blend_apply(c, fb.px[hy][hx]);
++                            if (bm_on)
++                                g_bm[(size_t)hy * ntr::SCREEN_W + hx] = bmv;
+                         } else {
+                             fb.px[hy][hx] = c;
+                             if (bm_on)
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 3c871f15d..cf2746029 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -5063,6 +5063,13 @@ void gx_card_settle_sink(uint32_t *dst3d, void (*done)(void))
+ }
+ void gx_card_note_behind() { g_cp_behind = 1; }
+ int gx_card_behind_seen() { return g_cp_active && g_cp_behind; }
++/* GX_OV_BLEND (gx.h): whether the host's card draws it, and whether this frame
++   wrote one */
++static int g_cp_blend_ok, g_cp_blend;
++void gx_card_set_blend_ok(int ok) { g_cp_blend_ok = ok ? 1 : 0; }
++int gx_card_blend_ok() { return g_cp_active && g_cp_blend_ok; }
++void gx_card_note_blend() { g_cp_blend = 1; }
++int gx_card_blend_seen() { return g_cp_active && g_cp_blend; }
+ int gx_card_pre_needed() { return g_cp_active && g_cp_pre_needed; }
+ void gx_card_retire(const Framebuffer *fb)
+ {
+@@ -5110,6 +5117,7 @@ static void clear_fill_impl(Framebuffer &fb, bool wipe)
+     g_cp_active = 0;
+     g_cp_pending = 0;
+     g_cp_behind = 0;
++    g_cp_blend = 0;
+     g_cp_pre_needed = 0;
+     g_cp_sink = nullptr;
+     g_cp_sink_done = nullptr;
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index f8eca96ce..2b5bb0699 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -607,6 +607,43 @@ void gx_clear_fill(Framebuffer &fb);
+ #define GX_OV_NONE   0x00u
+ #define GX_OV_FRONT  0xFFu
+ #define GX_OV_BEHIND 0xFEu
++// A BLEND WITH THE 3D LAYER (a semi-transparent sprite over the 3D, BLDALPHA's
++// eva/evb), for a host whose card says it can draw one (gx_card_blend_ok):
++// alpha 1..0xEF. The colour is the sprite's share, premultiplied (top *
++// eva / 16), and the alpha byte is 255 - 16 * evb, so the 3D pixel's share is
++// what the present adds: c + dst * (1 - a / 255), clamped, the DS's blend in
++// 8 bits. Where the 3D drew nothing dst is the clear colour, as the
++// processor's blend reads it. gx_card_note_blend: such a word was written this
++// frame. Without the card's say-so the compositor settles instead, as before.
++inline bool gx_ov_is_blend(uint32_t w)
++{
++    const uint32_t a = w >> 24;
++    return a != 0 && a < GX_OV_BEHIND;
++}
++inline uint32_t gx_ov_blend_word(uint32_t top, int eva, int evb)
++{
++    auto share = [&](int sh) {
++        const int v = (int)((top >> sh) & 0xFFu) * eva / 16;
++        return (uint32_t)(v > 255 ? 255 : v) << sh;
++    };
++    int a = 255 - 16 * evb;
++    if (a < 1) a = 1;
++    return (uint32_t)a << 24 | share(16) | share(8) | share(0);
++}
++// The word over a picture's own pixel `base` (a settle's resolve).
++inline uint32_t gx_ov_blend_apply(uint32_t w, uint32_t base)
++{
++    const int k = 255 - (int)(w >> 24);
++    auto mix = [&](int sh) {
++        const int v = (int)((w >> sh) & 0xFFu) + ((int)((base >> sh) & 0xFFu) * k + 127) / 255;
++        return (uint32_t)(v > 255 ? 255 : v) << sh;
++    };
++    return 0xFF000000u | mix(16) | mix(8) | mix(0);
++}
++void gx_card_set_blend_ok(int ok);
++int gx_card_blend_ok();
++void gx_card_note_blend();
++int gx_card_blend_seen();
+ void gx_card_present_allow(int allow);
+ int gx_card_overlay_active();
+ void gx_card_settle();
+-- 
+2.55.0.windows.5
+

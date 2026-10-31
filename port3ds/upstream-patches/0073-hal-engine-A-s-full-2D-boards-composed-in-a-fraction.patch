@@ -1,0 +1,448 @@
+From 7cac8c4f7c34293eec6d44175d96f9f9e3df9a2f Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 10:45:02 -0700
+Subject: [PATCH] hal: engine A's full 2D boards composed in a fraction of the
+ time
+
+A minigame's top screen is three or four whole text BGs, and composing it took 25-77 ms of a frame on the 3DS. Now: the BGs are kept as whole-map pictures that redraw only changed tiles; a whole visible run of a layer that can't blend goes straight in; a native scene's cells go out in rows without the per-cell decisions (and without the HUD element labels it never uses); the pause-menu memo backs off on a screen that keeps changing. The cells match the reference loop (SM64DS_TWOD_VERIFY=1: minigames, title, intro, levels 1 and 6, the pause menu, the touch menus).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 362 +++++++++++++++++++++++++++++++-
+ 1 file changed, 353 insertions(+), 9 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index 76d5dfc10..f496906de 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -3924,6 +3924,137 @@ void memo_finish()
+ 
+ }  // namespace
+ 
++/* ---- ENGINE A'S TEXT BGs KEPT AS PICTURES (3DS lane) -----------------------
++ *
++ * A minigame's top screen is three or four whole text BGs, and the BG loop
++ * read every tile of each one every frame: 13-16 ms of a board's frame on the
++ * 3DS. Their maps and tiles hardly change from frame to frame (the scroll
++ * does), so each BG is kept as a picture of its whole map in palette indices,
++ * the 4bpp bank folded in (0 = transparent), as ntr/ppu_sub.cpp's scan cache
++ * keeps engine B's. Its inputs are compared with saved copies each frame (the
++ * map, and the tile data up to the highest tile the map names): a changed map
++ * entry or tile redraws only its own tiles. A BG that redrew a quarter of its
++ * map three frames in a row is read tile by tile, as before, until it settles. The cells are the BG
++ * loop's own (SM64DS_TWOD_VERIFY=1 compares them with the reference loop's);
++ * SM64DS_BG_PLANE_OFF=1 reads every tile every frame. */
++namespace {
++struct APlane {
++    uint32_t screen = 0, chars = 0;
++    bool bpp8 = false;
++    int tw = 0, th = 0;
++    std::vector<uint8_t> map, chr;   // the inputs as they were last frame
++    std::vector<uint8_t> ix;         // (tw * 8) x (th * 8) indices
++    bool valid = false;              // ix is a picture of map and chr
++    int busy = 0;                    // frames in a row that redrew much of it
++    bool direct = false;             // read directly until the inputs settle
++};
++APlane g_aplane[4];
++
++/* one tile of the picture, from the map entry at (tx, ty) */
++void aplane_tile(APlane &p, const BgConfig &c, int tx, int ty)
++{
++    const uint16_t se = rd16(screen_entry_addr(c, tx, ty));
++    const uint32_t tile = se & 0x3FF;
++    const unsigned bank = c.bpp8 ? 0u : ((se >> 12) & 0xFu) << 4;
++    const bool hflip = (se & 0x400) != 0;
++    const int pw = c.tiles_w * 8;
++    for (int fy = 0; fy < 8; ++fy) {
++        const int sy = (se & 0x800) ? 7 - fy : fy;
++        uint8_t *const dst = &p.ix[(size_t)(ty * 8 + fy) * pw + tx * 8];
++        if (c.bpp8) {
++            const uint8_t *src = reinterpret_cast<const uint8_t *>(c.chars + tile * 64 + sy * 8);
++            for (int fx = 0; fx < 8; ++fx) dst[fx] = src[hflip ? 7 - fx : fx];
++        } else {
++            const uint8_t *src = reinterpret_cast<const uint8_t *>(c.chars + tile * 32 + sy * 4);
++            for (int fx = 0; fx < 8; ++fx) {
++                const int sx = hflip ? 7 - fx : fx;
++                const unsigned v = (src[sx >> 1] >> ((sx & 1) * 4)) & 0xFu;
++                dst[fx] = v ? (uint8_t)(v | bank) : 0;
++            }
++        }
++    }
++}
++
++/* BG bg's picture for this frame, or null to read its tiles directly */
++const uint8_t *aplane_prepare(int bg, const BgConfig &c)
++{
++    static const bool off = std::getenv("SM64DS_BG_PLANE_OFF") != nullptr;
++    if (off) return nullptr;
++    APlane &p = g_aplane[bg];
++    const size_t map_len = (size_t)c.tiles_w * (size_t)c.tiles_h * 2u;
++    const uint8_t *const map = reinterpret_cast<const uint8_t *>(c.screen);
++    unsigned top = 0;
++    for (size_t i = 0; i < map_len; i += 2) {
++        const unsigned t = (map[i] | (unsigned)map[i + 1] << 8) & 0x3FFu;
++        if (t > top) top = t;
++    }
++    const size_t tsz = c.bpp8 ? 64u : 32u;
++    const size_t chr_len = (top + 1) * tsz;
++    const uint8_t *const chr = reinterpret_cast<const uint8_t *>(c.chars);
++    const bool same_bg = p.screen == c.screen && p.chars == c.chars && p.bpp8 == c.bpp8 &&
++                         p.tw == c.tiles_w && p.th == c.tiles_h && p.map.size() == map_len;
++    const bool same = same_bg && p.chr.size() == chr_len && !std::memcmp(p.map.data(), map, map_len) &&
++                      !std::memcmp(p.chr.data(), chr, chr_len);
++    const auto save = [&] {
++        p.screen = c.screen;
++        p.chars = c.chars;
++        p.bpp8 = c.bpp8;
++        p.tw = c.tiles_w;
++        p.th = c.tiles_h;
++        p.map.assign(map, map + map_len);
++        p.chr.assign(chr, chr + chr_len);
++    };
++    const auto redraw_all = [&] {
++        p.ix.resize((size_t)c.tiles_w * 8u * (size_t)c.tiles_h * 8u);
++        for (int ty = 0; ty < c.tiles_h; ++ty)
++            for (int tx = 0; tx < c.tiles_w; ++tx) aplane_tile(p, c, tx, ty);
++    };
++    if (same) {
++        p.busy = 0;
++        p.direct = false;
++        if (!p.valid) {   // settled: the picture again
++            redraw_all();
++            p.valid = true;
++        }
++        return p.ix.data();
++    }
++    if (p.direct) {   // changing every frame: read directly until it settles
++        save();
++        p.valid = false;
++        return nullptr;
++    }
++    const int tiles = c.tiles_w * c.tiles_h;
++    int n = 0;
++    if (p.valid && same_bg) {   // only the changed tiles
++        bool tile_changed[1024] = {};
++        const size_t old_len = p.chr.size();
++        for (unsigned t = 0; t <= top; ++t)
++            tile_changed[t] = (size_t)(t + 1) * tsz > old_len ||
++                              std::memcmp(p.chr.data() + t * tsz, chr + t * tsz, tsz) != 0;
++        for (int ty = 0; ty < c.tiles_h; ++ty)
++            for (int tx = 0; tx < c.tiles_w; ++tx) {
++                const size_t at = screen_entry_addr(c, tx, ty) - c.screen;
++                const unsigned now = map[at] | (unsigned)map[at + 1] << 8;
++                const unsigned was = p.map[at] | (unsigned)p.map[at + 1] << 8;
++                if (now != was || tile_changed[now & 0x3FFu]) {
++                    aplane_tile(p, c, tx, ty);
++                    ++n;
++                }
++            }
++    } else {
++        redraw_all();
++        n = tiles;
++    }
++    save();
++    p.valid = true;
++    /* three frames in a row that each redrew a quarter of the map or more:
++       the picture costs more than it saves */
++    p.busy = n * 4 > tiles ? p.busy + 1 : 0;
++    if (p.busy >= 3) p.direct = true;
++    return p.ix.data();
++}
++}  // namespace
++
+ // Rasterise engine A's 2D layers into the DS 256x192 hit buffer, then composite
+ // the covered pixels over the host 3D framebuffer (scaled by integer factor).
+ // Called from walk_window right after gx_render and before the fade composite.
+@@ -4097,7 +4228,15 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+         g_memo.cur_blits.clear();
+         if (memo_why_on() && g_memo.on && last < memo_cells() && last > 0)
+             std::fprintf(stderr, "[memo-why] untried: the last frame blitted %u cells\n", last);
+-        if (g_memo.on && last >= memo_cells() && !forced_blank && !tw_try && !lc_ov.live &&
++        /* A SCREEN THAT KEEPS CHANGING (a minigame's board in play, 3DS lane)
++           misses every try, and each try costs the inputs' gather, their sums
++           and the recording. After four misses in a row only every eighth
++           frame tries, until one hits; a menu that comes to rest is replayed
++           within eight frames. */
++        static unsigned memo_misses, memo_wait;
++        const bool memo_now = memo_wait == 0 || memo_verify_on();
++        if (memo_wait) --memo_wait;
++        if (g_memo.on && memo_now && last >= memo_cells() && !forced_blank && !tw_try && !lc_ov.live &&
+             !lc_ov.top_live && ntr::gx_card_overlay_active() && memo_probes_off()) {
+             memo_inputs(dispcnt, g_memo.cur_scal, g_memo.cur_spans);
+             g_memo.sums_ok = false;
+@@ -4113,6 +4252,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                 any = true;
+                 if (!memo_same(f)) continue;
+                 if (!memo_verify_on()) {
++                    memo_misses = 0;
+                     memo_replay(fb, f);
+                     ++g_cz.memo_hits;
+                     g_cz.mark(9);   /* the inputs' compare and the replay */
+@@ -4122,6 +4262,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                 ++g_cz.memo_match;
+             }
+             if (memo_why_on() && !any) std::fprintf(stderr, "[memo-why] no saved frame\n");
++            if (any && ++memo_misses >= 4) memo_wait = 7;
+             g_memo.rec = true;
+         }
+     }
+@@ -4313,6 +4454,8 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+         unsigned char wrow[256];
+         uint32_t pal32[256];
+         for (int i = 0; i < 256; ++i) pal32[i] = bgr555(rd16(kPlttBase + i * 2));
++        const uint8_t *plane[4];   /* each layer's picture (aplane_prepare), or null */
++        for (int k = 0; k < nbg; ++k) plane[k] = aplane_prepare(bgorder[k], bgs[bgorder[k]]);
+         for (int y = 0; y < 192; ++y) {
+             window_mask_row(win, y, wrow);
+             /* LAYER BY LAYER along the line. A pixel's result depends only on
+@@ -4329,6 +4472,31 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                 const int py = (y + c.vofs) & (c.tiles_h * 8 - 1);
+                 const int xmask = c.tiles_w * 8 - 1;
+                 const uint32_t bit4 = bit * 0x01010101u;
++                if (const uint8_t *const pix = plane[k]) {   /* the layer's row out of its picture */
++                    const uint8_t *const prow = pix + (size_t)py * (size_t)(xmask + 1);
++                    const bool blends = !bl.off && bl.mode == 1 && (bl.first & bit);
++                    Cell *const cell = g_a[y];
++                    uint32_t touched = 0;
++                    for (int x = 0; x < 256; ++x) {
++                        const unsigned v = prow[(x + c.hofs) & xmask];
++                        if (!v) continue;
++                        const unsigned mask = wrow[x];
++                        if (!(mask & bit)) continue;
++                        uint32_t s = pal32[v];
++                        if (blends && (mask & 0x20) && cell[x].hit && (bl.second & (1u << cell[x].owner)))
++                            s = blend_alpha(s, cell[x].color, bl.eva, bl.evb);
++                        cell[x].color = s;
++                        cell[x].hit = true;
++                        cell[x].owner = (uint8_t)bg;
++                        cell[x].prio = (uint8_t)c.priority;
++                        touched |= 1u << (x >> 3);
++                    }
++                    if (touched) {
++                        g_a_clean[y] = 0;
++                        g_a_quiet[y] &= ~touched;
++                    }
++                    continue;
++                }
+                 for (int x = 0; x < 256;) {
+                     if (!(x & 3)) {   /* four columns the window hides at once */
+                         uint32_t w4;
+@@ -4352,15 +4520,39 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                     }
+                     if (!(lo | hi)) { x += n; continue; }   /* index 0 all along */
+                     const uint32_t bank = c.bpp8 ? 0u : ((se >> 12) & 0xFu) * 16u;
++                    /* the run's texels, once: texel fx of the row is a byte
++                       (8bpp) or a nibble, low nibble first (4bpp),
++                       little-endian in the word */
++                    uint8_t ix[8];
++                    bool shown = true;
++                    for (int i = 0; i < n; ++i) {
++                        const int fx = (se & 0x400) ? 7 - (fx0 + i) : fx0 + i;
++                        ix[i] = (uint8_t)(c.bpp8 ? ((fx < 4 ? lo : hi) >> ((fx & 3) * 8)) & 0xFFu
++                                                 : (lo >> (fx * 4)) & 0xFu);
++                        shown &= (wrow[x + i] & bit) != 0;
++                    }
++                    /* A run the window shows whole, of a layer that can't
++                       alpha-blend: its texels go straight in (a full 2D board
++                       is nearly all such runs, 3DS lane). */
++                    if (shown && (bl.off || bl.mode != 1 || !(bl.first & bit))) {
++                        Cell *const cell = &g_a[y][x];
++                        bool any = false;
++                        for (int i = 0; i < n; ++i) {
++                            if (!ix[i]) continue;
++                            cell[i].color = pal32[ix[i] + bank];
++                            cell[i].hit = true;
++                            cell[i].owner = (uint8_t)bg;
++                            cell[i].prio = (uint8_t)c.priority;
++                            any = true;
++                        }
++                        if (any) { a_mark(y, x); a_mark(y, x + n - 1); }
++                        x += n;
++                        continue;
++                    }
+                     for (int i = 0; i < n; ++i, ++x) {
+                         const unsigned mask = wrow[x];
+                         if (!(mask & bit)) continue;
+-                        const int fx = (se & 0x400) ? 7 - (fx0 + i) : fx0 + i;
+-                        /* texel fx of the row: a byte (8bpp) or a nibble, low
+-                           nibble first (4bpp), little-endian in the word */
+-                        const uint32_t index = c.bpp8
+-                            ? ((fx < 4 ? lo : hi) >> ((fx & 3) * 8)) & 0xFFu
+-                            : (lo >> (fx * 4)) & 0xFu;
++                        const uint32_t index = ix[i];
+                         if (!index) continue;
+                         uint32_t s = pal32[index + bank];
+                         // BGs draw far->near (prio 3..0, then bg 3..0), so when
+@@ -4741,7 +4933,10 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     }
+     const bool bandsplit = hud_bandsplit_env();
+     g_cz.mark(7);
+-    if (ntr::widescreen && !bandsplit) hudelem::resolve(band_l, band_r, margin);
++    /* A scene presented natively places every cell at its own column (the
++       pillarbox arm below), so it has no elements to label: the labelling was
++       4-11 ms of a minigame board's frame on the 3DS, for nothing. */
++    if (ntr::widescreen && !bandsplit && !ntr::present_native()) hudelem::resolve(band_l, band_r, margin);
+     g_cz.mark(8);
+     /* TWO QUESTIONS, KEPT APART SO THE A/B ARM STILL MEASURES. `shown3d` is
+        whether the 3D layer is in the picture at all, which decides whether the
+@@ -4852,7 +5047,156 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+         f_word = word;
+         f_bits = bits;
+     };
+-    for (int pass = 0; pass < 2; ++pass) {
++    /* A NATIVE SCENE'S 2D, ON THE CARD (3DS lane: the minigames' boards).
++       Every hit cell there takes one of two arms of the loop below: the
++       pillarbox placement (no element label), no card blit, no HUD pass, and
++       the FRONT word (or raster_obj's blend word, as it is), or the BEHIND
++       word for a layer behind the 3D. So a row goes out as span_cell calls without the per-cell
++       decisions, which were ~39 ms of a full board's frame. A layer the lift
++       hides is skipped as the loop skips it; any other lift verdict, the
++       pre-smoothing copy or SM64DS_NATIVE_BLIT_OFF=1 takes the loop. */
++    static const bool native_blit_off = std::getenv("SM64DS_NATIVE_BLIT_OFF") != nullptr;
++    bool native_fast = !native_blit_off && ntr::present_native() && ovl3d && !gpu_blit &&
++                       !pre && !g_hud_row_live && !bandsplit;
++    /* a cell of a layer behind the 3D takes the BEHIND word, as below */
++    bool native_behind[8][4] = {};
++    for (unsigned o = 0; honour3d && o < 8; ++o)
++        for (int pr = 0; pr < 4; ++pr) native_behind[o][pr] = layer_behind_3d(o, pr, p3d);
++    bool native_any_behind = false;
++    bool native_hide[8] = {};
++    for (unsigned o = 0; native_fast && o < 8; ++o) {
++        const int v = lc_overlay_verdict(o);
++        if (v == 2) native_hide[o] = true;
++        else if (v) native_fast = false;
++    }
++    /* and where a DS cell is one host pixel (the 3DS's 400x240: the native
++       field is 256x192 at scale 1), straight into the row: a run of one word
++       is then what span_cell would have made of it, so the signature and the
++       memo's blits are the same, without its calls and reloads per cell */
++    const bool one_to_one = native_fast && ntr::widescreen && s_colx0[256] - s_colx0[0] == 256 &&
++                            s_rowy0[192] - s_rowy0[0] == 192;
++    if (one_to_one && !g_memo.rec) {
++        /* Not being recorded: no blits to keep, so no runs either. The rows go
++           straight out and the signature folds each row's words, a word a
++           column (0 for an empty one), in place of the runs' three words a
++           run: the same picture gives the same signature, frame to frame. */
++        const int ox = s_colx0[0] + margin / 2;
++        unsigned cells = 0;
++        for (int y = 0; y < 192; ++y) {
++            if (g_a_clean[y]) continue;
++            const uint32_t quiet = g_a_quiet[y];
++            const int hy = s_rowy0[y];
++            if (bm_on) { window_mask_row(win, y, bm_wrow); bm_wrow_y = y; }
++            uint32_t *const out = &fb.px[hy][ox];
++            unsigned char *const mrow = bm_on ? g_bm + (size_t)hy * ntr::SCREEN_W + ox : nullptr;
++            const Cell *const row = g_a[y];
++            uint32_t h = 2166136261u ^ (uint32_t)hy;
++            for (int x = 0; x < 256; ++x) {
++                if ((quiet >> (x >> 3)) & 1u) {
++                    h = (h ^ (0xFFFF0000u | (uint32_t)x)) * 16777619u;
++                    x |= 7;
++                    continue;
++                }
++                const Cell gc = row[x];
++                if (!gc.hit || native_hide[gc.owner & 7]) {
++                    h *= 16777619u;
++                    continue;
++                }
++                ++cells;
++                const uint32_t c = gc.color;
++                const bool behind = native_behind[gc.owner & 7][gc.prio & 3];
++                native_any_behind |= behind;
++                const uint32_t word = behind ? (c & 0x00FFFFFFu) | (GX_OV_BEHIND << 24)
++                                      : ntr::gx_ov_is_blend(c) ? c : (c & 0x00FFFFFFu) | (GX_OV_FRONT << 24);
++                out[x] = word;
++                h = (h ^ word) * 16777619u;
++                if (mrow) {
++                    const bool bmv = (bm_wrow[x] & 0x20) && (bm_first & (1u << gc.owner));
++                    mrow[x] = (unsigned char)((mrow[x] & 3u) | (bmv ? 4u : 0u) | (behind ? 16u : 8u));
++                    h ^= bmv ? 0x40000000u : 0u;
++                }
++            }
++            pic_sig_add(h);
++        }
++        g_memo.cells_now += cells;
++        if (g_cz.on > 0) { g_cz.cells += cells; g_cz.fast += cells; }
++    } else if (one_to_one) {
++        const int ox = s_colx0[0] + margin / 2;
++        unsigned cells = 0;
++        for (int y = 0; y < 192; ++y) {
++            if (g_a_clean[y]) continue;
++            const uint32_t quiet = g_a_quiet[y];
++            const int hy = s_rowy0[y];
++            if (bm_on) { window_mask_row(win, y, bm_wrow); bm_wrow_y = y; }
++            uint32_t *const out = &fb.px[hy][ox];
++            unsigned char *const mrow = bm_on ? g_bm + (size_t)hy * ntr::SCREEN_W + ox : nullptr;
++            const Cell *const row = g_a[y];
++            int r0 = -1, r1 = -1;   /* the open run, columns [r0, r1) */
++            uint32_t rword = 0;
++            unsigned char rbits = 0;
++            auto run_end = [&] {
++                if (r0 < 0) return;
++                pic_sig_add((uint32_t)(ox + r0) | (uint32_t)(ox + r1) << 16);
++                pic_sig_add((uint32_t)hy | (uint32_t)(hy + 1) << 16);
++                pic_sig_add(rword);
++                if (g_memo.rec) g_memo.cur_blits.push_back(MemoBlit{ox + r0, ox + r1, hy, hy + 1, rword});
++                if (g_cz.on > 0) ++g_cz.spans;
++                r0 = -1;
++            };
++            for (int x = 0; x < 256; ++x) {
++                if ((quiet >> (x >> 3)) & 1u) { x |= 7; continue; }
++                const Cell gc = row[x];
++                if (!gc.hit || native_hide[gc.owner & 7]) continue;
++                ++cells;
++                const uint32_t c = gc.color;
++                const bool behind = native_behind[gc.owner & 7][gc.prio & 3];
++                native_any_behind |= behind;
++                const uint32_t word = behind ? (c & 0x00FFFFFFu) | (GX_OV_BEHIND << 24)
++                                      : ntr::gx_ov_is_blend(c) ? c : (c & 0x00FFFFFFu) | (GX_OV_FRONT << 24);
++                const unsigned char bits = (unsigned char)(
++                    ((bm_on && (bm_wrow[x] & 0x20) && (bm_first & (1u << gc.owner))) ? 4u : 0u) |
++                    (behind ? 16u : 8u));
++                out[x] = word;
++                if (mrow) mrow[x] = (unsigned char)((mrow[x] & 3u) | bits);
++                if (r0 >= 0 && x == r1 && word == rword && bits == rbits) { r1 = x + 1; continue; }
++                run_end();
++                r0 = x; r1 = x + 1; rword = word; rbits = bits;
++            }
++            run_end();
++        }
++        g_memo.cells_now += cells;
++        if (g_cz.on > 0) { g_cz.cells += cells; g_cz.fast += cells; }
++    } else if (native_fast) {
++        const int nx0 = ntr::widescreen ? margin / 2 : 0;
++        for (int y = 0; y < 192; ++y) {
++            if (g_a_clean[y]) continue;
++            const uint32_t quiet = g_a_quiet[y];
++            const int hy0 = s_rowy0[y], hy1 = s_rowy0[y + 1];
++            if (bm_on) { window_mask_row(win, y, bm_wrow); bm_wrow_y = y; }
++            for (int x = 0; x < 256; ++x) {
++                if ((quiet >> (x >> 3)) & 1u) { x |= 7; continue; }
++                const Cell &gc = g_a[y][x];
++                if (!gc.hit || native_hide[gc.owner & 7]) continue;
++                ++g_memo.cells_now;
++                if (g_cz.on > 0) { ++g_cz.cells; ++g_cz.fast; }
++                const uint32_t c = gc.color;
++                const bool behind = native_behind[gc.owner & 7][gc.prio & 3];
++                native_any_behind |= behind;
++                const uint32_t word = behind ? (c & 0x00FFFFFFu) | (GX_OV_BEHIND << 24)
++                                      : ntr::gx_ov_is_blend(c) ? c : (c & 0x00FFFFFFu) | (GX_OV_FRONT << 24);
++                const bool bmv = bm_on && (bm_wrow[x] & 0x20) && (bm_first & (1u << gc.owner));
++                const int ux0 = ntr::widescreen ? s_colx0[x] : x * sx;
++                const int bw = ntr::widescreen ? s_colx0[x + 1] - ux0 : sx;
++                span_cell(ux0 + nx0, bw, hy0, hy1, word,
++                          (unsigned char)((bmv ? 4u : 0u) | (behind ? 16u : 8u)));
++            }
++        }
++    }
++    if (native_any_behind) {   /* what the loop's BEHIND arm tells the card */
++        ntr::gx_card_note_behind();
++        g_memo.behind_now = true;
++    }
++    for (int pass = native_fast ? 2 : 0; pass < 2; ++pass) {
+     if (pass && !g_hud_row_live) break;
+     /* pass 0 = the DS plane, pass 1 = the moved coin block's own plane (drawn after, so it covers what is under it) */
+     for (int y = 0; y < 192; ++y) {
+-- 
+2.55.0.windows.5
+

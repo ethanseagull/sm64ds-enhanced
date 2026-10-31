@@ -1,0 +1,4155 @@
+[
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern ObjLE *data_0209f318;",
+  "action": "alias_local",
+  "name": "data_0209f318"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_02110124;",
+  "action": "alias_local",
+  "name": "data_ov002_02110124"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_02110154;",
+  "action": "alias_local",
+  "name": "data_ov002_02110154"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_021101b4;",
+  "action": "alias_local",
+  "name": "data_ov002_021101b4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_0211022c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211022c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_021102a4;",
+  "action": "alias_local",
+  "name": "data_ov002_021102a4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_02110304;",
+  "action": "alias_local",
+  "name": "data_ov002_02110304"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_0211031c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211031c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_02110364;",
+  "action": "alias_local",
+  "name": "data_ov002_02110364"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_02110424;",
+  "action": "alias_local",
+  "name": "data_ov002_02110424"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_0211043c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211043c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_021104e4;",
+  "action": "alias_local",
+  "name": "data_ov002_021104e4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_02110514;",
+  "action": "alias_local",
+  "name": "data_ov002_02110514"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_021105bc;",
+  "action": "alias_local",
+  "name": "data_ov002_021105bc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_0211064c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211064c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern Player::State data_ov002_021106dc;",
+  "action": "alias_local",
+  "name": "data_ov002_021106dc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern SharedFilePtr *data_ov002_020ff480[];",
+  "action": "alias_local",
+  "name": "data_ov002_020ff480"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern State3i data_ov002_0211046c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211046c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_0209caa0[];",
+  "action": "alias_local",
+  "name": "data_0209caa0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_0209f4a0[];",
+  "action": "alias_local",
+  "name": "data_0209f4a0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_020a0e5a[];",
+  "action": "alias_local",
+  "name": "data_020a0e5a"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_0211001c[];",
+  "action": "alias_local",
+  "name": "data_ov002_0211001c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_0211010c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211010c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_02110124;",
+  "action": "alias_local",
+  "name": "data_ov002_02110124"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_02110124[];",
+  "action": "alias_local",
+  "name": "data_ov002_02110124"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_0211013c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211013c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_0211013c[];",
+  "action": "alias_local",
+  "name": "data_ov002_0211013c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_02110154[];",
+  "action": "alias_local",
+  "name": "data_ov002_02110154"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_02110184;",
+  "action": "alias_local",
+  "name": "data_ov002_02110184"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_021101b4;",
+  "action": "alias_local",
+  "name": "data_ov002_021101b4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_021101b4[];",
+  "action": "alias_local",
+  "name": "data_ov002_021101b4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_0211022c[];",
+  "action": "alias_local",
+  "name": "data_ov002_0211022c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_02110364;",
+  "action": "alias_local",
+  "name": "data_ov002_02110364"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_0211043c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211043c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_021104e4;",
+  "action": "alias_local",
+  "name": "data_ov002_021104e4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_02110514;",
+  "action": "alias_local",
+  "name": "data_ov002_02110514"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_0211058c[];",
+  "action": "alias_local",
+  "name": "data_ov002_0211058c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_0211064c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211064c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_02110664;",
+  "action": "alias_local",
+  "name": "data_ov002_02110664"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_0211067c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211067c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_0211067c[];",
+  "action": "alias_local",
+  "name": "data_ov002_0211067c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_021106ac[];",
+  "action": "alias_local",
+  "name": "data_ov002_021106ac"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char data_ov002_021106f4[];",
+  "action": "alias_local",
+  "name": "data_ov002_021106f4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char* data_0209f318;",
+  "action": "alias_local",
+  "name": "data_0209f318"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern char* data_0209f32c;",
+  "action": "alias_local",
+  "name": "data_0209f32c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern dBgPi *_ZNK10dBgCh_Actr14GetFloorResultEv(const dBgCh_Actr *self);",
+  "action": "alias_local",
+  "name": "_ZNK10dBgCh_Actr14GetFloorResultEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int AngleDiff(short a, short b);",
+  "action": "alias_local",
+  "name": "AngleDiff"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int ApproachAngle(void*, int, int, int, int);",
+  "action": "alias_local",
+  "name": "ApproachAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int ApproachAngle(void*, short targetAngle, short invFactor, short maxDelta, short minDelta);",
+  "action": "alias_local",
+  "name": "ApproachAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int NumStars(void);",
+  "action": "alias_local",
+  "name": "NumStars"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int Player_AdvanceAnims(void*);",
+  "action": "alias_local",
+  "name": "Player_AdvanceAnims"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int Player_DisableInteraction(void*);",
+  "action": "alias_local",
+  "name": "Player_DisableInteraction"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int Player_ReleaseHeldActor(void*);",
+  "action": "alias_local",
+  "name": "Player_ReleaseHeldActor"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int Vec3_HorzAngle(const Vec3i *v0, const Vec3i *v1);",
+  "action": "alias_local",
+  "name": "Vec3_HorzAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int Vec3_HorzLen(void*);",
+  "action": "alias_local",
+  "name": "Vec3_HorzLen"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int Vec3_VertAngle(const Vec3i *v1, const Vec3i *v0);",
+  "action": "alias_local",
+  "name": "Vec3_VertAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _Z14ApproachLinearRiii(void*, int, int);",
+  "action": "alias_local",
+  "name": "_Z14ApproachLinearRiii"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _Z15ApproachLinear2Rsss(short& dst, short to, short step);",
+  "action": "alias_local",
+  "name": "_Z15ApproachLinear2Rsss"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _Z15ApproachLinear2Rsss(void*, s16 target, s16 step);",
+  "action": "alias_local",
+  "name": "_Z15ApproachLinear2Rsss"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN4cstd5atan2E5Fix12IiES1_(Fix12i a, int b);",
+  "action": "alias_local",
+  "name": "_ZN4cstd5atan2E5Fix12IiES1_"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN4cstd5atan2E5Fix12IiES1_(Fix12i, Fix12i);",
+  "action": "alias_local",
+  "name": "_ZN4cstd5atan2E5Fix12IiES1_"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN4cstd5atan2E5Fix12IiES1_(int a, int b);",
+  "action": "alias_local",
+  "name": "_ZN4cstd5atan2E5Fix12IiES1_"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN4cstd5atan2E5Fix12IiES1_(int x, int z);",
+  "action": "alias_local",
+  "name": "_ZN4cstd5atan2E5Fix12IiES1_"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN4cstd5atan2E5Fix12IiES1_(int y, int x);",
+  "action": "alias_local",
+  "name": "_ZN4cstd5atan2E5Fix12IiES1_"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN4cstd5atan2E5Fix12IiES1_(int, int);",
+  "action": "alias_local",
+  "name": "_ZN4cstd5atan2E5Fix12IiES1_"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN5Sound13PlayCharVoiceEjjRK7Vector3(unsigned int, unsigned int, void*);",
+  "action": "alias_local",
+  "name": "_ZN5Sound13PlayCharVoiceEjjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN5Sound9PlayBank0EjRK7Vector3(unsigned int, void*);",
+  "action": "alias_local",
+  "name": "_ZN5Sound9PlayBank0EjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player11ChangeStateERNS_5StateE(void*, void*);",
+  "action": "alias_local",
+  "name": "_ZN6Player11ChangeStateERNS_5StateE"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player17SetNoControlStateEhih(void*, unsigned char a, int b, unsigned char d);",
+  "action": "alias_local",
+  "name": "_ZN6Player17SetNoControlStateEhih"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player17SetNoControlStateEhih(void*, unsigned char, int, unsigned char);",
+  "action": "alias_local",
+  "name": "_ZN6Player17SetNoControlStateEhih"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player7IsStateERNS_5StateE(void*, Player::State &s);",
+  "action": "alias_local",
+  "name": "_ZN6Player7IsStateERNS_5StateE"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player7IsStateERNS_5StateE(void*, Player::State& s);",
+  "action": "alias_local",
+  "name": "_ZN6Player7IsStateERNS_5StateE"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player7IsStateERNS_5StateE(void*, State& s);",
+  "action": "alias_local",
+  "name": "_ZN6Player7IsStateERNS_5StateE"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player7SetAnimEji5Fix12IiEj(void*, int, int, int, unsigned int);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int a, int b, int d, unsigned int e);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int a, int b, int f, unsigned int d);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int a, int b, int f, unsigned int g);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int, int, Fix12, unsigned int);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int, int, Fix12i, unsigned int);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int, int, int, unsigned int);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int, int, int, unsigned short);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned, int, int, unsigned);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN6Player9GetHealthEv(void);",
+  "action": "alias_local",
+  "name": "_ZN6Player9GetHealthEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN8Particle6System3NewEjj5Fix12IiES2_S2_PK11Vector3_16fPNS_8CallbackE(int, unsigned int, int, int, int, int, int);",
+  "action": "alias_local",
+  "name": "_ZN8Particle6System3NewEjj5Fix12IiES2_S2_PK11Vector3_16fPNS_8CallbackE"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN8dActor_c5SpawnEjjRK7Vector3PK10Vector3_16as(int, int, void*, int, int, int);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c5SpawnEjjRK7Vector3PK10Vector3_16as"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN8dActor_c5SpawnEjjRK7Vector3PK10Vector3_16as(unsigned int, unsigned int, const Vec3i *, const void *, int, int);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c5SpawnEjjRK7Vector3PK10Vector3_16as"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN8dActor_c5SpawnEjjRK7Vector3PK10Vector3_16as(unsigned int, unsigned int, const struct Vector3*, const struct Vector3_16*, int, int);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c5SpawnEjjRK7Vector3PK10Vector3_16as"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZN9Animation8LoadFileER13SharedFilePtr(void*);",
+  "action": "alias_local",
+  "name": "_ZN9Animation8LoadFileER13SharedFilePtr"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZNK10dBgCh_Actr10IsOnGroundEv(const void* self);",
+  "action": "alias_local",
+  "name": "_ZNK10dBgCh_Actr10IsOnGroundEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZNK6Player14GetBodyModelIDEjb(Player const *, unsigned int, bool);",
+  "action": "alias_local",
+  "name": "_ZNK6Player14GetBodyModelIDEjb"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZNK6Player14GetBodyModelIDEjb(void*, u32 a, u32 b);",
+  "action": "alias_local",
+  "name": "_ZNK6Player14GetBodyModelIDEjb"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZNK6Player14GetBodyModelIDEjb(void*, unsigned char, int);",
+  "action": "alias_local",
+  "name": "_ZNK6Player14GetBodyModelIDEjb"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZNK6Player14GetBodyModelIDEjb(void*, unsigned int, bool);",
+  "action": "alias_local",
+  "name": "_ZNK6Player14GetBodyModelIDEjb"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int _ZNK9Animation12WillHitFrameEi(Animation const *, int);",
+  "action": "alias_local",
+  "name": "_ZNK9Animation12WillHitFrameEi"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_0209caa0;",
+  "action": "alias_local",
+  "name": "data_0209caa0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_0209caa0[];",
+  "action": "alias_local",
+  "name": "data_0209caa0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_0209f318;",
+  "action": "alias_local",
+  "name": "data_0209f318"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_0209f318[];",
+  "action": "alias_local",
+  "name": "data_0209f318"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_0209f32c[];",
+  "action": "alias_local",
+  "name": "data_0209f32c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_020ff220[];",
+  "action": "alias_local",
+  "name": "data_ov002_020ff220"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_020ff480[];",
+  "action": "alias_local",
+  "name": "data_ov002_020ff480"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_0211004c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211004c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_0211010c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211010c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_0211013c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211013c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_0211013c[];",
+  "action": "alias_local",
+  "name": "data_ov002_0211013c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_02110154[];",
+  "action": "alias_local",
+  "name": "data_ov002_02110154"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_021101b4;",
+  "action": "alias_local",
+  "name": "data_ov002_021101b4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_02110214[];",
+  "action": "alias_local",
+  "name": "data_ov002_02110214"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_0211025c[];",
+  "action": "alias_local",
+  "name": "data_ov002_0211025c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_021102a4[];",
+  "action": "alias_local",
+  "name": "data_ov002_021102a4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_021102d4;",
+  "action": "alias_local",
+  "name": "data_ov002_021102d4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_0211043c[];",
+  "action": "alias_local",
+  "name": "data_ov002_0211043c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_021104b4[];",
+  "action": "alias_local",
+  "name": "data_ov002_021104b4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_021105a4;",
+  "action": "alias_local",
+  "name": "data_ov002_021105a4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_0211067c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211067c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_0211067c[];",
+  "action": "alias_local",
+  "name": "data_ov002_0211067c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_021106ac;",
+  "action": "alias_local",
+  "name": "data_ov002_021106ac"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_021106ac[];",
+  "action": "alias_local",
+  "name": "data_ov002_021106ac"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_021106c4[];",
+  "action": "alias_local",
+  "name": "data_ov002_021106c4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_021106dc[];",
+  "action": "alias_local",
+  "name": "data_ov002_021106dc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int data_ov002_021106f4[];",
+  "action": "alias_local",
+  "name": "data_ov002_021106f4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_0200d064(void*, int playerID);",
+  "action": "alias_local",
+  "name": "func_0200d064"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020bd8c0(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020bd8c0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020bd928(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020bd928"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020bd984(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020bd984"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020bd9ec(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020bd9ec"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020bda48(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bda48"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020bea7c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bea7c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020beb38(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020beb38"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020becf4(void*, int v, int arg2);",
+  "action": "alias_local",
+  "name": "func_ov002_020becf4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020becf4(void*, unsigned int a, int b);",
+  "action": "alias_local",
+  "name": "func_ov002_020becf4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020bf224(void*, int a, int b);",
+  "action": "alias_local",
+  "name": "func_ov002_020bf224"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020bf224(void*, int, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020bf224"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020bf40c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bf40c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020bfec0(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bfec0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c0434(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c0434"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c04ac(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c04ac"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c04e0(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c04e0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c0cbc(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c0cbc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c0d90(void*, int y);",
+  "action": "alias_local",
+  "name": "func_ov002_020c0d90"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c0fb4(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c0fb4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c1234(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c1234"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c179c(void*, int angle);",
+  "action": "alias_local",
+  "name": "func_ov002_020c179c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c18b0(void*, int x);",
+  "action": "alias_local",
+  "name": "func_ov002_020c18b0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c19d0(void*, int a, int b);",
+  "action": "alias_local",
+  "name": "func_ov002_020c19d0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c19d0(void*, int arg1, int arg2);",
+  "action": "alias_local",
+  "name": "func_ov002_020c19d0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c1ad8(void*, int ang);",
+  "action": "alias_local",
+  "name": "func_ov002_020c1ad8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c1c84(void*, int ang);",
+  "action": "alias_local",
+  "name": "func_ov002_020c1c84"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c200c(void*, int ang);",
+  "action": "alias_local",
+  "name": "func_ov002_020c200c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c2138(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c2138"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c231c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c231c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c29d4(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c29d4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c2fec(void*, void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c2fec"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c38a0(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c38a0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c3a48(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c3a48"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c3bdc(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c3bdc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c4188(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c4188"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c43c4(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020c43c4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c44c4(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c44c4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c47f4(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c47f4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c51d0(void*, void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c51d0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c5444(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c5444"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c56f0(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020c56f0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c5d0c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c5d0c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c5d60(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c5d60"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c5dec(void*, int a);",
+  "action": "alias_local",
+  "name": "func_ov002_020c5dec"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c5dec(void*, int arg1);",
+  "action": "alias_local",
+  "name": "func_ov002_020c5dec"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c5dec(void*, int n);",
+  "action": "alias_local",
+  "name": "func_ov002_020c5dec"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c5dec(void*, int r1);",
+  "action": "alias_local",
+  "name": "func_ov002_020c5dec"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c5dec(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020c5dec"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c607c(void*, int a, int b, void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c607c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c61ac(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c61ac"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c647c(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020c647c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c6538(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c6538"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c6908(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c6908"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c6adc(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c6adc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c7cbc(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c7cbc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c7f10(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c7f10"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c84b0(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c84b0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c8540(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c8540"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c8a4c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c8a4c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c9128(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c9128"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c91bc(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c91bc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020c94a4(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c94a4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020cac60(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cac60"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020cbea8(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cbea8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020cc01c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cc01c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020ce324(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020ce324"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020ce5f8(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020ce5f8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020ceaf4(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020ceaf4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020ceb54(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020ceb54"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020ceb7c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020ceb7c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020cec2c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cec2c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020cf20c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cf20c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020cfaf0(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cfaf0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020d91e0(void*, u32 a, int b);",
+  "action": "alias_local",
+  "name": "func_ov002_020d91e0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int func_ov002_020eeca8(void*, void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020eeca8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern int* data_0209f318;",
+  "action": "alias_local",
+  "name": "data_0209f318"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern s16 GetAngleToCamera(u8 i);",
+  "action": "alias_local",
+  "name": "GetAngleToCamera"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern s16 data_0209f4a0[];",
+  "action": "alias_local",
+  "name": "data_0209f4a0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern s32 ApproachAngle(void*, s16 from, s16 start, s16 speed, s16 max);",
+  "action": "alias_local",
+  "name": "ApproachAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern short Vec3_HorzAngle(const void *v0, const void *v1);",
+  "action": "alias_local",
+  "name": "Vec3_HorzAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern short Vec3_VertAngle(const Vec3i *v1, const Vec3i *v0);",
+  "action": "alias_local",
+  "name": "Vec3_VertAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern short _Z15ApproachLinear2Rsss(short& v, short t, short s);",
+  "action": "alias_local",
+  "name": "_Z15ApproachLinear2Rsss"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern short data_0209f4a0;",
+  "action": "alias_local",
+  "name": "data_0209f4a0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern short data_0209f4a0[];",
+  "action": "alias_local",
+  "name": "data_0209f4a0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern short data_0209f4a4;",
+  "action": "alias_local",
+  "name": "data_0209f4a4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern struct CameraRaw *data_0209f318;",
+  "action": "alias_local",
+  "name": "data_0209f318"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern struct CameraRaw* data_0209f318;",
+  "action": "alias_local",
+  "name": "data_0209f318"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern struct S18a data_0209f4a4[];",
+  "action": "alias_local",
+  "name": "data_0209f4a4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern struct S18b data_0209f49e[];",
+  "action": "alias_local",
+  "name": "data_0209f49e"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern struct S18b2 data_0209f4a0[];",
+  "action": "alias_local",
+  "name": "data_0209f4a0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern struct State data_ov002_0211010c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211010c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern struct State data_ov002_02110124;",
+  "action": "alias_local",
+  "name": "data_ov002_02110124"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern struct State data_ov002_0211022c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211022c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern struct State2i data_ov002_0211022c;",
+  "action": "alias_local",
+  "name": "data_ov002_0211022c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern u16 data_0209f49c[];",
+  "action": "alias_local",
+  "name": "data_0209f49c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern u16 data_0209f49e[];",
+  "action": "alias_local",
+  "name": "data_0209f49e"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern u32 _ZN5Sound8PlayLongEjjjRK7Vector3s(u32 a, u32 b, u32 c, void*, u32 d);",
+  "action": "alias_local",
+  "name": "_ZN5Sound8PlayLongEjjjRK7Vector3s"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern u32 _ZNK6Player14GetBodyModelIDEjb(void*, u32 a, bool b);",
+  "action": "alias_local",
+  "name": "_ZNK6Player14GetBodyModelIDEjb"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern u32 _ZNK6Player14GetBodyModelIDEjb(void*, u32 a, char b);",
+  "action": "alias_local",
+  "name": "_ZNK6Player14GetBodyModelIDEjb"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern u32 _ZNK6Player14GetBodyModelIDEjb(void*, u32 a, int b);",
+  "action": "alias_local",
+  "name": "_ZNK6Player14GetBodyModelIDEjb"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern u32 data_0209b454;",
+  "action": "alias_local",
+  "name": "data_0209b454"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern u32 func_02012790(u32 a);",
+  "action": "alias_local",
+  "name": "func_02012790"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern u8 data_0209f2fc;",
+  "action": "alias_local",
+  "name": "data_0209f2fc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern u8 data_0209f49e[];",
+  "action": "alias_local",
+  "name": "data_0209f49e"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern u8 data_0209f4ac[];",
+  "action": "alias_local",
+  "name": "data_0209f4ac"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern unsigned _ZNK5dBgPi9GetClsnIDEv(void*);",
+  "action": "alias_local",
+  "name": "_ZNK5dBgPi9GetClsnIDEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern unsigned char data_0209f2fc;",
+  "action": "alias_local",
+  "name": "data_0209f2fc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern unsigned char data_0209f49e;",
+  "action": "alias_local",
+  "name": "data_0209f49e"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern unsigned char data_020a0e40[];",
+  "action": "alias_local",
+  "name": "data_020a0e40"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern unsigned int _ZN5Sound8PlayLongEjjjRK7Vector3s(unsigned int a, unsigned int b, unsigned int c, Vec3i const *v, unsigned int d);",
+  "action": "alias_local",
+  "name": "_ZN5Sound8PlayLongEjjjRK7Vector3s"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern unsigned int _ZN5Sound8PlayLongEjjjRK7Vector3s(unsigned int a, unsigned int b, unsigned int c, const struct Vector3 *v, unsigned int d);",
+  "action": "alias_local",
+  "name": "_ZN5Sound8PlayLongEjjjRK7Vector3s"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern unsigned int _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int anim, int a, int fix, unsigned int b);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern unsigned int _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int, int, int, unsigned int);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern unsigned int _ZNK6Player14GetBodyModelIDEjb(void*, unsigned int a, int b);",
+  "action": "alias_local",
+  "name": "_ZNK6Player14GetBodyModelIDEjb"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern unsigned int _ZNK6Player14GetBodyModelIDEjb(void*, unsigned int, char);",
+  "action": "alias_local",
+  "name": "_ZNK6Player14GetBodyModelIDEjb"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern unsigned int func_02012790(unsigned int a);",
+  "action": "alias_local",
+  "name": "func_02012790"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern unsigned short data_0209f49c;",
+  "action": "alias_local",
+  "name": "data_0209f49c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void *_ZN8dActor_c10FindWithIDEj(unsigned id);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c10FindWithIDEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void *_ZN8dActor_c10FindWithIDEj(unsigned int id);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c10FindWithIDEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void *data_ov002_020ff480[];",
+  "action": "alias_local",
+  "name": "data_ov002_020ff480"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void ApproachAngle(void*, int target, int a, int b, int d);",
+  "action": "alias_local",
+  "name": "ApproachAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void Player_AdvanceAnims(void*);",
+  "action": "alias_local",
+  "name": "Player_AdvanceAnims"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void Player_DisableInteraction(void*);",
+  "action": "alias_local",
+  "name": "Player_DisableInteraction"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void Vec3_RotateYAndTranslate(void*, const Vector3 *in, int angle, const Vector3 *src);",
+  "action": "alias_local",
+  "name": "Vec3_RotateYAndTranslate"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void Vec3_RotateYAndTranslate(void*, const Vector3 *origin, int angle, const Vector3 *offset);",
+  "action": "alias_local",
+  "name": "Vec3_RotateYAndTranslate"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void Vec3_RotateYAndTranslate(void*, const Vector3*, int, const Vector3*);",
+  "action": "alias_local",
+  "name": "Vec3_RotateYAndTranslate"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void Vec3_RotateYAndTranslate(void*, void*, int ang, void*);",
+  "action": "alias_local",
+  "name": "Vec3_RotateYAndTranslate"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void Vec3_RotateYAndTranslate(void*, void*, int, void*);",
+  "action": "alias_local",
+  "name": "Vec3_RotateYAndTranslate"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _Z15ApproachLinear2Rsss(short&, short, short);",
+  "action": "alias_local",
+  "name": "_Z15ApproachLinear2Rsss"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Model14SetPolygonModeEi(void*, int mode);",
+  "action": "alias_local",
+  "name": "_ZN5Model14SetPolygonModeEi"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound13PlayCharVoiceEjjRK7Vector3(u32 a, u32 b, void*);",
+  "action": "alias_local",
+  "name": "_ZN5Sound13PlayCharVoiceEjjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound13PlayCharVoiceEjjRK7Vector3(unsigned int a, unsigned int b, Vec3i const *v);",
+  "action": "alias_local",
+  "name": "_ZN5Sound13PlayCharVoiceEjjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound13PlayCharVoiceEjjRK7Vector3(unsigned int a, unsigned int b, const Vector3 *v);",
+  "action": "alias_local",
+  "name": "_ZN5Sound13PlayCharVoiceEjjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound13PlayCharVoiceEjjRK7Vector3(unsigned int a, unsigned int b, void*);",
+  "action": "alias_local",
+  "name": "_ZN5Sound13PlayCharVoiceEjjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound13PlayCharVoiceEjjRK7Vector3(unsigned int, unsigned int, const Vector3&);",
+  "action": "alias_local",
+  "name": "_ZN5Sound13PlayCharVoiceEjjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound13PlayCharVoiceEjjRK7Vector3(unsigned, unsigned, void*);",
+  "action": "alias_local",
+  "name": "_ZN5Sound13PlayCharVoiceEjjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound17ChangeMusicVolumeEj5Fix12IiE(int, int);",
+  "action": "alias_local",
+  "name": "_ZN5Sound17ChangeMusicVolumeEj5Fix12IiE"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound17ChangeMusicVolumeEj5Fix12IiE(unsigned int, int);",
+  "action": "alias_local",
+  "name": "_ZN5Sound17ChangeMusicVolumeEj5Fix12IiE"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound9PlayBank0EjRK7Vector3(int, void*);",
+  "action": "alias_local",
+  "name": "_ZN5Sound9PlayBank0EjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound9PlayBank0EjRK7Vector3(u32 id, const struct Vector3 *pos);",
+  "action": "alias_local",
+  "name": "_ZN5Sound9PlayBank0EjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound9PlayBank0EjRK7Vector3(u32 id, const struct Vector3* pos);",
+  "action": "alias_local",
+  "name": "_ZN5Sound9PlayBank0EjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound9PlayBank0EjRK7Vector3(u32 id, const void* v);",
+  "action": "alias_local",
+  "name": "_ZN5Sound9PlayBank0EjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound9PlayBank0EjRK7Vector3(unsigned int, const Vector3&);",
+  "action": "alias_local",
+  "name": "_ZN5Sound9PlayBank0EjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN5Sound9PlayBank3EjRK7Vector3(u32 id, const struct Vector3* pos);",
+  "action": "alias_local",
+  "name": "_ZN5Sound9PlayBank3EjRK7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player11ChangeStateERNS_5StateE(void*, void*);",
+  "action": "alias_local",
+  "name": "_ZN6Player11ChangeStateERNS_5StateE"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player11ShowMessageER7fBase_cjPK7Vector3hh(void*, fBase_c &, unsigned int, Vector3 const *, unsigned int, unsigned int);",
+  "action": "alias_local",
+  "name": "_ZN6Player11ShowMessageER7fBase_cjPK7Vector3hh"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player12Unk_020c9e5cEh(void*, int);",
+  "action": "alias_local",
+  "name": "_ZN6Player12Unk_020c9e5cEh"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player18SetNewHatCharacterEjjb(void*, u32 a, u32 b, bool c);",
+  "action": "alias_local",
+  "name": "_ZN6Player18SetNewHatCharacterEjjb"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, int a, int b, int c, u32 d);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, u32 a, int b, Fix12i c, u32 d);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, u32 a, int b, int d, u32 e);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, u32 a, int b, int f, u32 g);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, u32 anim, int a, Fix12i b, u32 d);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, u32 anim, int a, int b, u32 d);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, u32 anim, int a, int fix, u32 b);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, u32 anim, int a, int fix, u32 e);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, u32 anim, s32 a, s32 b, u32 d);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int a, int b, Fix12i c, unsigned int d);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int a, int b, int cc, unsigned int d);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int a, int b, int d, unsigned int e);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int a, int b, int f, unsigned int g);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int a, int b, int fix, unsigned int d);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int anim, int a, int b, unsigned int d);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int id, int flags, int speed, unsigned int extra);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int, int, Fix12i, unsigned int);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int, int, Fix12t, unsigned int);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned int, int, int, unsigned int);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN6Player7SetAnimEji5Fix12IiEj(void*, unsigned, int, int, unsigned);",
+  "action": "alias_local",
+  "name": "_ZN6Player7SetAnimEji5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN9Animation8LoadFileER13SharedFilePtr(void*);",
+  "action": "alias_local",
+  "name": "_ZN9Animation8LoadFileER13SharedFilePtr"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZN9dBgCh_Lin13SetObjAndLineERK7Vector3S2_P8dActor_c(void*, const Vec3i* a, const Vec3i* b, void*);",
+  "action": "alias_local",
+  "name": "_ZN9dBgCh_Lin13SetObjAndLineERK7Vector3S2_P8dActor_c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void _ZNK11SurfaceInfo12CopyNormalToER7Vector3(const void* self, void*);",
+  "action": "alias_local",
+  "name": "_ZNK11SurfaceInfo12CopyNormalToER7Vector3"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_0200d81c(void*, u8 playerID);",
+  "action": "alias_local",
+  "name": "func_0200d81c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_02012694(u32 a, void*);",
+  "action": "alias_local",
+  "name": "func_02012694"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_02012694(u32 id, void*);",
+  "action": "alias_local",
+  "name": "func_02012694"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_0201f32c(s16 a);",
+  "action": "alias_local",
+  "name": "func_0201f32c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_020731dc(void*, void*, void*);",
+  "action": "alias_local",
+  "name": "func_020731dc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bd8c0(void*, unsigned int r1);",
+  "action": "alias_local",
+  "name": "func_ov002_020bd8c0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bd8c0(void*, unsigned int);",
+  "action": "alias_local",
+  "name": "func_ov002_020bd8c0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bd928(void*, unsigned int);",
+  "action": "alias_local",
+  "name": "func_ov002_020bd928"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bd984(void*, int n);",
+  "action": "alias_local",
+  "name": "func_ov002_020bd984"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bd984(void*, int x);",
+  "action": "alias_local",
+  "name": "func_ov002_020bd984"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bd9ec(void*, u32 a);",
+  "action": "alias_local",
+  "name": "func_ov002_020bd9ec"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bd9ec(void*, unsigned int r4);",
+  "action": "alias_local",
+  "name": "func_ov002_020bd9ec"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bda48(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bda48"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bdb50(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020bdb50"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bdb50(void*, unsigned int p2);",
+  "action": "alias_local",
+  "name": "func_ov002_020bdb50"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bdc18(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bdc18"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bdd9c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bdd9c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bdef0(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bdef0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bdf8c(int);",
+  "action": "alias_local",
+  "name": "func_ov002_020bdf8c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020be008(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020be008"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bf13c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bf13c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bf340(void*, void*, s32 delta, s32 limit);",
+  "action": "alias_local",
+  "name": "func_ov002_020bf340"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bf36c(void*, void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bf36c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bf5e0(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bf5e0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bf800(void*, Vector3_16f v);",
+  "action": "alias_local",
+  "name": "func_ov002_020bf800"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bf88c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bf88c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020bfa74(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020bfa74"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c0108(void*, int x);",
+  "action": "alias_local",
+  "name": "func_ov002_020c0108"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c0108(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020c0108"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c0364(void*, u32 a);",
+  "action": "alias_local",
+  "name": "func_ov002_020c0364"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c0364(void*, unsigned int arg);",
+  "action": "alias_local",
+  "name": "func_ov002_020c0364"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c1234(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c1234"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c133c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c133c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c16ec(void*, void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c16ec"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c1eb4(void*, int arg);",
+  "action": "alias_local",
+  "name": "func_ov002_020c1eb4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c1eb4(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020c1eb4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c29d4(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c29d4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c2db8(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c2db8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c2e78(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c2e78"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c3148(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c3148"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c3160(void*, void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c3160"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c37a4(void*, void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c37a4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c3cf0(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c3cf0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c43c4(void*, int a);",
+  "action": "alias_local",
+  "name": "func_ov002_020c43c4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c43c4(void*, u32 a);",
+  "action": "alias_local",
+  "name": "func_ov002_020c43c4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c43c4(void*, unsigned int idx);",
+  "action": "alias_local",
+  "name": "func_ov002_020c43c4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c5444(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c5444"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c5dec(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020c5dec"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c71e0(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c71e0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c7ff8(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c7ff8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c8714(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c8714"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c897c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c897c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c8a4c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c8a4c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c8b54(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c8b54"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c8b78(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c8b78"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c8cb0(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c8cb0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c8d14(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c8d14"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c8f0c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c8f0c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c8f80(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c8f80"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c904c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c904c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c924c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c924c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c9288(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c9288"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c92fc(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c92fc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c965c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c965c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c9718(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c9718"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c9b10(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c9b10"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c9d68(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c9d68"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020c9e18(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020c9e18"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020ca108(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020ca108"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020ca940(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020ca940"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cabe0(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cabe0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cae10(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cae10"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cb400(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cb400"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cb474(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cb474"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cc05c(void*, unsigned short);",
+  "action": "alias_local",
+  "name": "func_ov002_020cc05c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cc1f4(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cc1f4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cc660(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020cc660"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cd190(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cd190"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cd218(void*, int, void*, void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cd218"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cd2c4(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cd2c4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cd308(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cd308"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cd364(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cd364"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cd39c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cd39c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cd3e0(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cd3e0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cd448(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cd448"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cd550(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cd550"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cd71c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cd71c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020ce798(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020ce798"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020ce8bc(void*, int arg);",
+  "action": "alias_local",
+  "name": "func_ov002_020ce8bc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020ce8bc(void*, int x);",
+  "action": "alias_local",
+  "name": "func_ov002_020ce8bc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020ce9c8(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020ce9c8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020ceb7c(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020ceb7c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cef84(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cef84"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020cf384(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020cf384"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020db8bc(void*, int a);",
+  "action": "alias_local",
+  "name": "func_ov002_020db8bc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020e25f0(void*, int a);",
+  "action": "alias_local",
+  "name": "func_ov002_020e25f0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void func_ov002_020e6b74(void*, void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020e6b74"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void* _ZN8Particle6System3NewEjj5Fix12IiES2_S2_PK11Vector3_16fPNS_8CallbackE(unsigned int a, unsigned int b, int c, int d, int e, const void* f, void*);",
+  "action": "alias_local",
+  "name": "_ZN8Particle6System3NewEjj5Fix12IiES2_S2_PK11Vector3_16fPNS_8CallbackE"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void* _ZN8dActor_c10FindWithIDEj(u32 id);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c10FindWithIDEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void* _ZN8dActor_c10FindWithIDEj(unsigned int id);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c10FindWithIDEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void* data_0209f318[];",
+  "action": "alias_local",
+  "name": "data_0209f318"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void* data_ov002_020ff480[];",
+  "action": "alias_local",
+  "name": "data_ov002_020ff480"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern void* data_ov002_02110304;",
+  "action": "alias_local",
+  "name": "data_ov002_02110304"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern char *data_ov006_0213b098[];",
+  "action": "alias_local",
+  "name": "data_ov006_0213b098"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern char *data_ov006_02141a40;",
+  "action": "alias_local",
+  "name": "data_ov006_02141a40"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern int data_ov006_0213b00c[];",
+  "action": "alias_local",
+  "name": "data_ov006_0213b00c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern int data_ov006_02140408;",
+  "action": "alias_local",
+  "name": "data_ov006_02140408"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern int data_ov006_0214040c;",
+  "action": "alias_local",
+  "name": "data_ov006_0214040c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern int data_ov006_02140424;",
+  "action": "alias_local",
+  "name": "data_ov006_02140424"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern int data_ov006_02140424[];",
+  "action": "alias_local",
+  "name": "data_ov006_02140424"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern int data_ov006_02140428[];",
+  "action": "alias_local",
+  "name": "data_ov006_02140428"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern int data_ov006_0214042c;",
+  "action": "alias_local",
+  "name": "data_ov006_0214042c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern int data_ov006_02140430;",
+  "action": "alias_local",
+  "name": "data_ov006_02140430"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern u8 data_020a0de8[];",
+  "action": "alias_local",
+  "name": "data_020a0de8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern u8 data_020a0de9[];",
+  "action": "alias_local",
+  "name": "data_020a0de9"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern u8 data_020a0dea[];",
+  "action": "alias_local",
+  "name": "data_020a0dea"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern u8 data_020a0deb[];",
+  "action": "alias_local",
+  "name": "data_020a0deb"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern void *data_ov006_02140408;",
+  "action": "alias_local",
+  "name": "data_ov006_02140408"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern void *data_ov006_0214041c;",
+  "action": "alias_local",
+  "name": "data_ov006_0214041c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern void *data_ov006_0214041c[];",
+  "action": "alias_local",
+  "name": "data_ov006_0214041c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern void *data_ov006_0214042c;",
+  "action": "alias_local",
+  "name": "data_ov006_0214042c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern void func_ov006_020bfec0(char *p, void *q, short *s);",
+  "action": "alias_local",
+  "name": "func_ov006_020bfec0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dMgJump3DMario_c.cpp",
+  "line": "extern void func_ov006_020bfec0(void *a, char *b, short *d);",
+  "action": "alias_local",
+  "name": "func_ov006_020bfec0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern PanelPmf_09c data_ov006_02142840[];",
+  "action": "alias_local",
+  "name": "data_ov006_02142840"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern PanelPmf_eb8 data_ov006_02142840[];",
+  "action": "alias_local",
+  "name": "data_ov006_02142840"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern PanelPmf_f44 data_ov006_02142840[];",
+  "action": "alias_local",
+  "name": "data_ov006_02142840"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern PanelPmf_fdc data_ov006_02142840[];",
+  "action": "alias_local",
+  "name": "data_ov006_02142840"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern int data_ov006_02142840[];",
+  "action": "alias_local",
+  "name": "data_ov006_02142840"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern u8 data_0209d454;",
+  "action": "alias_local",
+  "name": "data_0209d454"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern u8 data_020a0de8[];",
+  "action": "alias_local",
+  "name": "data_020a0de8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern void func_ov004_020afdd0(void *a0, int a1, int a2, int a3, int a4);",
+  "action": "alias_local",
+  "name": "func_ov004_020afdd0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern void func_ov006_02104c60(PanelC_7f0 *);",
+  "action": "alias_local",
+  "name": "func_ov006_02104c60"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern void func_ov006_021050bc(dScMgPanel_c *c);",
+  "action": "alias_local",
+  "name": "func_ov006_021050bc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern void func_ov006_021050bc(void *c);",
+  "action": "alias_local",
+  "name": "func_ov006_021050bc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern void func_ov006_021057f0(void *c);",
+  "action": "alias_local",
+  "name": "func_ov006_021057f0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "extern void func_ov006_02105854(void *c);",
+  "action": "alias_local",
+  "name": "func_ov006_02105854"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "int func_ov006_02106664(dScMgPanel_c *c);",
+  "action": "alias_local",
+  "name": "func_ov006_02106664"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "void func_ov006_02104580(void *c);",
+  "action": "alias_local",
+  "name": "func_ov006_02104580"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "void func_ov006_02104870(void *c);",
+  "action": "alias_local",
+  "name": "func_ov006_02104870"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "void func_ov006_02104ea8(void *c);",
+  "action": "alias_local",
+  "name": "func_ov006_02104ea8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "void func_ov006_021050bc(PanelC_09c *c);",
+  "action": "alias_local",
+  "name": "func_ov006_021050bc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "void func_ov006_021050bc(void *c);",
+  "action": "alias_local",
+  "name": "func_ov006_021050bc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "void func_ov006_02105134(PanelC_09c *c);",
+  "action": "alias_local",
+  "name": "func_ov006_02105134"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "void func_ov006_02105c88(PanelC_09c *c);",
+  "action": "alias_local",
+  "name": "func_ov006_02105c88"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "void func_ov006_02105d20(PanelC_09c *c);",
+  "action": "alias_local",
+  "name": "func_ov006_02105d20"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "void func_ov006_02105de4(PanelC_09c *c);",
+  "action": "alias_local",
+  "name": "func_ov006_02105de4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "void func_ov006_02106080(dScMgPanel_c *c, int x);",
+  "action": "alias_local",
+  "name": "func_ov006_02106080"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgPanel_c.cpp",
+  "line": "void func_ov006_021068d8(void *c);",
+  "action": "alias_local",
+  "name": "func_ov006_021068d8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern int Vec3_Dist(const struct Vector3 *a, const struct Vector3 *b);",
+  "action": "alias_local",
+  "name": "Vec3_Dist"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern int Vec3_Dist(const void* a, const void* b);",
+  "action": "alias_local",
+  "name": "Vec3_Dist"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern int _ZNK10dBgCh_Actr13JustHitGroundEv(void *);",
+  "action": "alias_local",
+  "name": "_ZNK10dBgCh_Actr13JustHitGroundEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern short Vec3_HorzAngle(const struct Vector3 *a, const struct Vector3 *b);",
+  "action": "alias_local",
+  "name": "Vec3_HorzAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern short Vec3_HorzAngle(const void* a, const void* b);",
+  "action": "alias_local",
+  "name": "Vec3_HorzAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern void _ZN9ModelAnim7SetAnimEP8BCA_Filei5Fix12IiEj(void *m, void *f, int i, int fx, unsigned int j);",
+  "action": "alias_local",
+  "name": "_ZN9ModelAnim7SetAnimEP8BCA_Filei5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern void _ZN9ModelAnim7SetAnimEP8BCA_Filei5Fix12IiEj(void* anim, void* file, int a, int b, unsigned int u);",
+  "action": "alias_local",
+  "name": "_ZN9ModelAnim7SetAnimEP8BCA_Filei5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern void func_0200fc44(char *c, void *v, int x);",
+  "action": "alias_local",
+  "name": "func_0200fc44"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern void func_ov002_020ef228(void *a, void *b);",
+  "action": "alias_local",
+  "name": "func_ov002_020ef228"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern void func_ov102_0214bc20(void *c);",
+  "action": "alias_local",
+  "name": "func_ov102_0214bc20"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern void func_ov102_0214bc20(void* c);",
+  "action": "alias_local",
+  "name": "func_ov102_0214bc20"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern void func_ov102_0214bd20(void *c);",
+  "action": "alias_local",
+  "name": "func_ov102_0214bd20"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBmb_c.cpp",
+  "line": "extern void func_ov102_0214bd90(void*);",
+  "action": "alias_local",
+  "name": "func_ov102_0214bd90"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBombking_c.cpp",
+  "line": "short msg = 0;",
+  "action": "split_init",
+  "name": "msg"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daBombking_c.cpp",
+  "line": "unsigned char* other = *(unsigned char**)(thiz + 0x430);",
+  "action": "split_init",
+  "name": "other"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daGmch_c.cpp",
+  "line": "extern int data_0209e650[];",
+  "action": "alias_local",
+  "name": "data_0209e650"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daGmch_c.cpp",
+  "line": "extern void *data_ov081_02128ec4[];",
+  "action": "alias_local",
+  "name": "data_ov081_02128ec4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern char data_ov085_021305b0;",
+  "action": "alias_local",
+  "name": "data_ov085_021305b0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern char data_ov085_021305b8;",
+  "action": "alias_local",
+  "name": "data_ov085_021305b8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern char data_ov085_021305c0;",
+  "action": "alias_local",
+  "name": "data_ov085_021305c0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern char data_ov085_021305c8;",
+  "action": "alias_local",
+  "name": "data_ov085_021305c8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern char data_ov085_021305d0;",
+  "action": "alias_local",
+  "name": "data_ov085_021305d0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern char data_ov085_0213068c;",
+  "action": "alias_local",
+  "name": "data_ov085_0213068c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern char data_ov085_021306ac;",
+  "action": "alias_local",
+  "name": "data_ov085_021306ac"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern char data_ov085_021306bc;",
+  "action": "alias_local",
+  "name": "data_ov085_021306bc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern char data_ov085_021306bc[];",
+  "action": "alias_local",
+  "name": "data_ov085_021306bc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern char data_ov085_021306cc;",
+  "action": "alias_local",
+  "name": "data_ov085_021306cc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern char data_ov085_021306dc;",
+  "action": "alias_local",
+  "name": "data_ov085_021306dc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern daMip_G data_ov085_021305c0;",
+  "action": "alias_local",
+  "name": "data_ov085_021305c0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern int data_0209e650;",
+  "action": "alias_local",
+  "name": "data_0209e650"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern int data_020a0e68;",
+  "action": "alias_local",
+  "name": "data_020a0e68"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern int data_020a0e68[];",
+  "action": "alias_local",
+  "name": "data_020a0e68"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern int data_ov085_021306cc[];",
+  "action": "alias_local",
+  "name": "data_ov085_021306cc"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern void *data_ov085_021305b0[];",
+  "action": "alias_local",
+  "name": "data_ov085_021305b0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern void *data_ov085_021305c0[];",
+  "action": "alias_local",
+  "name": "data_ov085_021305c0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMip_c.cpp",
+  "line": "extern void *data_ov085_021305c8[];",
+  "action": "alias_local",
+  "name": "data_ov085_021305c8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern Mtx43 data_020a0e68;",
+  "action": "alias_local",
+  "name": "data_020a0e68"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern char data_ov030_02115ce0[];",
+  "action": "alias_local",
+  "name": "data_ov030_02115ce0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern daMky_G data_ov030_02115d18;",
+  "action": "alias_local",
+  "name": "data_ov030_02115d18"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern daMky_S data_ov030_02115d18;",
+  "action": "alias_local",
+  "name": "data_ov030_02115d18"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int Vec3_Dist(const Vector3* a, const Vector3* b);",
+  "action": "alias_local",
+  "name": "Vec3_Dist"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int Vec3_Dist(void *a, void *b);",
+  "action": "alias_local",
+  "name": "Vec3_Dist"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int _ZN6Player11ShowMessageER7fBase_cjPK7Vector3hh(char* p, char* self, u32 msg, const struct Vector3* pos, u32 a, u32 b);",
+  "action": "alias_local",
+  "name": "_ZN6Player11ShowMessageER7fBase_cjPK7Vector3hh"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int _ZN6Player11ShowMessageER7fBase_cjPK7Vector3hh(void *a, void *self, unsigned int, void *, unsigned int, unsigned int);",
+  "action": "alias_local",
+  "name": "_ZN6Player11ShowMessageER7fBase_cjPK7Vector3hh"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int _ZN6Player11ShowMessageER7fBase_cjPK7Vector3hh(void* self, void* actor, unsigned int msgId, const Vector3* pos, unsigned int d, unsigned int e);",
+  "action": "alias_local",
+  "name": "_ZN6Player11ShowMessageER7fBase_cjPK7Vector3hh"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int _ZN6Player12GetTalkStateEv(char* p);",
+  "action": "alias_local",
+  "name": "_ZN6Player12GetTalkStateEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int _ZN6Player12GetTalkStateEv(void *p);",
+  "action": "alias_local",
+  "name": "_ZN6Player12GetTalkStateEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int _ZN6Player12GetTalkStateEv(void *self);",
+  "action": "alias_local",
+  "name": "_ZN6Player12GetTalkStateEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int _ZN6Player12GetTalkStateEv(void* self);",
+  "action": "alias_local",
+  "name": "_ZN6Player12GetTalkStateEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int _ZN8dActor_c17DetectRaycastClsnER7Vector3S1_b(void* self, Vector3* a, Vector3* out, int doStore);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c17DetectRaycastClsnER7Vector3S1_b"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int _ZNK10dBgCh_Actr13JustHitGroundEv(char* w);",
+  "action": "alias_local",
+  "name": "_ZNK10dBgCh_Actr13JustHitGroundEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int _ZNK10dBgCh_Actr13JustHitGroundEv(void *p);",
+  "action": "alias_local",
+  "name": "_ZNK10dBgCh_Actr13JustHitGroundEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int _ZNK10dBgCh_Actr8IsOnWallEv(void *c);",
+  "action": "alias_local",
+  "name": "_ZNK10dBgCh_Actr8IsOnWallEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int data_ov030_02115cf0[];",
+  "action": "alias_local",
+  "name": "data_ov030_02115cf0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int func_ov030_02111dd0(void *c);",
+  "action": "alias_local",
+  "name": "func_ov030_02111dd0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int func_ov030_02111ea4(void *c);",
+  "action": "alias_local",
+  "name": "func_ov030_02111ea4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern int func_ov030_021141a8(void *a, int b);",
+  "action": "alias_local",
+  "name": "func_ov030_021141a8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern s16 Vec3_HorzAngle(const Vector3 *a, const Vector3 *b);",
+  "action": "alias_local",
+  "name": "Vec3_HorzAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern s16 Vec3_HorzAngle(const struct Vector3* a, const struct Vector3* b);",
+  "action": "alias_local",
+  "name": "Vec3_HorzAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern short Vec3_HorzAngle(const Vector3* v0, const Vector3* v1);",
+  "action": "alias_local",
+  "name": "Vec3_HorzAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern struct dActor_c* _ZN8dActor_c10FindWithIDEj(u32 id);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c10FindWithIDEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern struct dActor_c* _ZN8dActor_c5SpawnEjjRK7Vector3PK10Vector3_16as(u32 id, u32 param, const struct Vector3* pos, const struct Vector3_16* rot, int a, int b);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c5SpawnEjjRK7Vector3PK10Vector3_16as"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern u32 _ZNK5dBgPi9GetClsnIDEv(void *r);",
+  "action": "alias_local",
+  "name": "_ZNK5dBgPi9GetClsnIDEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void *data_ov030_02115cd0[];",
+  "action": "alias_local",
+  "name": "data_ov030_02115cd0"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void *data_ov030_02115cf8[];",
+  "action": "alias_local",
+  "name": "data_ov030_02115cf8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void *data_ov030_02115d08;",
+  "action": "alias_local",
+  "name": "data_ov030_02115d08"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void *data_ov030_02115d18;",
+  "action": "alias_local",
+  "name": "data_ov030_02115d18"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void *data_ov030_02115d18[];",
+  "action": "alias_local",
+  "name": "data_ov030_02115d18"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void *func_0203567c(void *p);",
+  "action": "alias_local",
+  "name": "func_0203567c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void Matrix4x3_ApplyInPlaceToTranslation(Mtx43 *m, int x, int y, int z);",
+  "action": "alias_local",
+  "name": "Matrix4x3_ApplyInPlaceToTranslation"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void Matrix4x3_ApplyInPlaceToTranslation(Mtx43* m, int x, int y, int z);",
+  "action": "alias_local",
+  "name": "Matrix4x3_ApplyInPlaceToTranslation"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void _ZN5dBgPiD1Ev(void *r);",
+  "action": "alias_local",
+  "name": "_ZN5dBgPiD1Ev"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void _ZN5dCc_c5ClearEv(char* cl);",
+  "action": "alias_local",
+  "name": "_ZN5dCc_c5ClearEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void _ZN5dCc_c6UpdateEv(char* cl);",
+  "action": "alias_local",
+  "name": "_ZN5dCc_c6UpdateEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void _ZN6Player9DropActorEv(char* p);",
+  "action": "alias_local",
+  "name": "_ZN6Player9DropActorEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void _ZN7fBase_c18MarkForDestructionEv(char* self);",
+  "action": "alias_local",
+  "name": "_ZN7fBase_c18MarkForDestructionEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void _ZN8dActor_c9UpdatePosEP5dCc_c(char* c, char* cl);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c9UpdatePosEP5dCc_c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void _ZN9Animation7AdvanceEv(char* a);",
+  "action": "alias_local",
+  "name": "_ZN9Animation7AdvanceEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void _ZN9ModelAnim7SetAnimEP8BCA_Filei5Fix12IiEj(char* ma, void* f, int b, Fix12i c, unsigned int d);",
+  "action": "alias_local",
+  "name": "_ZN9ModelAnim7SetAnimEP8BCA_Filei5Fix12IiEj"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_0201267c(int a, char* b);",
+  "action": "alias_local",
+  "name": "func_0201267c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_0201267c(u32 id, char* p);",
+  "action": "alias_local",
+  "name": "func_0201267c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_02111890(void *c);",
+  "action": "alias_local",
+  "name": "func_ov030_02111890"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_02111908(void* c);",
+  "action": "alias_local",
+  "name": "func_ov030_02111908"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_02111a00(void *c);",
+  "action": "alias_local",
+  "name": "func_ov030_02111a00"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_02111a00(void* c);",
+  "action": "alias_local",
+  "name": "func_ov030_02111a00"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_02111bc4(char *c);",
+  "action": "alias_local",
+  "name": "func_ov030_02111bc4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_02111bc4(char* c);",
+  "action": "alias_local",
+  "name": "func_ov030_02111bc4"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_02111f6c(char *c, void *w);",
+  "action": "alias_local",
+  "name": "func_ov030_02111f6c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_02111f6c(char* c, char* w);",
+  "action": "alias_local",
+  "name": "func_ov030_02111f6c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_02111f6c(void *c, void *w);",
+  "action": "alias_local",
+  "name": "func_ov030_02111f6c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_021141a8(char *c, int v);",
+  "action": "alias_local",
+  "name": "func_ov030_021141a8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_021141a8(char *c, int x);",
+  "action": "alias_local",
+  "name": "func_ov030_021141a8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_021141a8(char* c, int v);",
+  "action": "alias_local",
+  "name": "func_ov030_021141a8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_021141a8(char* self, int a);",
+  "action": "alias_local",
+  "name": "func_ov030_021141a8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_021141a8(void *a, int m);",
+  "action": "alias_local",
+  "name": "func_ov030_021141a8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_021141a8(void *c, int mode);",
+  "action": "alias_local",
+  "name": "func_ov030_021141a8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "extern void func_ov030_021141a8(void* c, int x);",
+  "action": "alias_local",
+  "name": "func_ov030_021141a8"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "int _Z14ApproachLinearRsss(s16 *v, s16 target, s16 step);",
+  "action": "alias_local",
+  "name": "_Z14ApproachLinearRsss"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "int _ZN6Player11ShowMessageER7fBase_cjPK7Vector3hh(void *player, void *actor, unsigned int id, const void *pos, unsigned int a, unsigned int b);",
+  "action": "alias_local",
+  "name": "_ZN6Player11ShowMessageER7fBase_cjPK7Vector3hh"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "int _ZNK10dBgCh_Actr10IsOnGroundEv(dBgCh_Actr* w);",
+  "action": "alias_local",
+  "name": "_ZNK10dBgCh_Actr10IsOnGroundEv"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "int func_ov030_02111b20(void *self);",
+  "action": "alias_local",
+  "name": "func_ov030_02111b20"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "void func_ov030_02111890(void *c);",
+  "action": "alias_local",
+  "name": "func_ov030_02111890"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "void func_ov030_02111908(void *c);",
+  "action": "alias_local",
+  "name": "func_ov030_02111908"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "void func_ov030_02111f6c(void *c, void *w);",
+  "action": "alias_local",
+  "name": "func_ov030_02111f6c"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "char *_ZN8dActor_c5SpawnEjjRK7Vector3PK10Vector3_16as(u32 id, u32 param, const void *pos, const void *rot, int areaID, int deathTableID);",
+  "action": "replace",
+  "with": "void* _ZN8dActor_c5SpawnEjjRK7Vector3PK10Vector3_16as(u32, u32, const Vector3*, const void*, int, int);"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/daMky_c.cpp",
+  "line": "spawned = _ZN8dActor_c5SpawnEjjRK7Vector3PK10Vector3_16as(0x10d, (mCapPlayerNo << 8) | 2, ((char *)this) + 0x5c, 0, mAreaId, -1);",
+  "action": "replace",
+  "with": "spawned = _ZN8dActor_c5SpawnEjjRK7Vector3PK10Vector3_16as(0x10d, (mCapPlayerNo << 8) | 2, (const Vector3 *)(((char *)this) + 0x5c), 0, mAreaId, -1);"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/func_ov084_021298d0.cpp",
+  "line": "unsigned int id = *(unsigned int*)(c + 0x1a4);",
+  "action": "split_init",
+  "name": "id"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_propeller_heyho.cpp",
+  "line": "extern void ApproachAngle(short* p, int target, int a, int b, int limit); /* byte-load-bearing: int target */",
+  "action": "alias_local",
+  "name": "ApproachAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_propeller_heyho.cpp",
+  "line": "extern \"C\" void ApproachAngle(short* v, short a, int b, int c, int d);",
+  "action": "replace",
+  "with": "extern int ApproachAngle(s16*, int, int, int, int);"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_propeller_heyho.cpp",
+  "line": "extern daPropeller_Heyho_c::State data_ov070_021235cc;",
+  "action": "replace",
+  "with": "extern \"C\" daPropeller_Heyho_c::State data_ov070_021235cc;  /* gccfix: one of three copies sits in extern \"C\" { } */"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_propeller_heyho.cpp",
+  "line": "extern void ApproachAngle(s16 *cur, s16 target, int a, int b, int c);",
+  "action": "replace",
+  "with": "extern int ApproachAngle(s16*, int, int, int, int);"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_propeller_heyho.cpp",
+  "line": "extern void ApproachAngle(s16 *dst, s16 target, int a, int b, int c);",
+  "action": "replace",
+  "with": "extern int ApproachAngle(s16*, int, int, int, int);"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_wanwan.cpp",
+  "line": "extern int DecIfAbove0_Short(void *p);",
+  "action": "alias_local",
+  "name": "DecIfAbove0_Short"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_wanwan.cpp",
+  "line": "s16 Vec3_HorzAngle(const Vector3 *a, const Vector3 *b);",
+  "action": "alias_local",
+  "name": "Vec3_HorzAngle"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_wanwan.cpp",
+  "line": "s32 Vec3_ApproachHorz(Vector3 *out, Vector3 *target, s32 maxStep);",
+  "action": "alias_local",
+  "name": "Vec3_ApproachHorz"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_wanwan.cpp",
+  "line": "s32 _Z14ApproachLinearRiii(void *dst, s32 target, s32 step);",
+  "action": "alias_local",
+  "name": "_Z14ApproachLinearRiii"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_wanwan.cpp",
+  "line": "s32 _Z14ApproachLinearRsss(void *dst, s32 target, s32 step);",
+  "action": "alias_local",
+  "name": "_Z14ApproachLinearRsss"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_wanwan.cpp",
+  "line": "u16 DecIfAbove0_Short(void *p);",
+  "action": "alias_local",
+  "name": "DecIfAbove0_Short"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_wanwan.cpp",
+  "line": "void *_ZN8dActor_c13ClosestPlayerEv(void *self_);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c13ClosestPlayerEv"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes.cpp",
+  "line": "void *_ZTV10dCcAcPos_c[];",
+  "action": "extern"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes.cpp",
+  "line": "void *_ZTV7dCcAc_c[];",
+  "action": "extern"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_bob_enemy.cpp",
+  "line": "void *_ZTV11CommonModel[];",
+  "action": "extern"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_bowserpuzzle.cpp",
+  "line": "void BowserPuzzleManager::Destructor0()",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_bowserpuzzle.cpp",
+  "line": "void BowserPuzzleManager::Destructor1()",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_ccm.cpp",
+  "line": "{ void *e = 0; (void)e; actorport_d16t_daPgMthr_c(s, e); return (int)(size_t)s; }",
+  "action": "drop_arg2",
+  "callee": "actorport_d16t_daPgMthr_c"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_ccm.cpp",
+  "line": "int _ZTV14daObj1UpLogo_c[];   /* RTTI alias, ONE speller (_ZN9OneUpLogoD0Ev),",
+  "action": "extern"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_ov010.cpp",
+  "line": "unsigned char port_ov010_trap_clsnfile[];   /* -> data_ov010_02112d00 */",
+  "action": "extern"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_ov010.cpp",
+  "line": "unsigned char port_ov010_trap_modelfile[];  /* -> data_ov010_02112d08 */",
+  "action": "extern"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_ov022_w3e.cpp",
+  "line": "{ void *e = 0; (void)e; actorport_d16t_daObj_volcanoCannon_c(s, e); return (int)(size_t)s; }",
+  "action": "drop_arg2",
+  "callee": "actorport_d16t_daObj_volcanoCannon_c"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_ov030.cpp",
+  "line": "{ void *e = 0; (void)e; actorport_d16t_daMky_c(s, e); return (int)(size_t)s; }",
+  "action": "drop_arg2",
+  "callee": "actorport_d16t_daMky_c"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_ov043.cpp",
+  "line": "int port_ov043_ukishima_file0[];   /* -> data_ov043_021125e8, the Model file */",
+  "action": "extern"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_ov043.cpp",
+  "line": "int port_ov043_ukishima_file1[];   /* -> data_ov043_021125e0, the collision file */",
+  "action": "extern"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_ov060.cpp",
+  "line": "{ void *e = 0; (void)e; actorport_d16t_SpikeBomb(s, e); return (int)(size_t)s; }",
+  "action": "drop_arg2",
+  "callee": "actorport_d16t_SpikeBomb"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_scuttlebug.cpp",
+  "action": "rename",
+  "name": "_ZTV10Scuttlebug",
+  "to": "_ZTV10Scuttlebug__hal"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_vspopup.cpp",
+  "line": "int _ZTV11daFeather_c[];      /* RTTI alias, ONE speller (_ZN11WingFeatherD0Ev) */",
+  "action": "extern"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actor_classes_vspopup.cpp",
+  "line": "int _ZTV13daObjNumber_c[];    /* RTTI alias, ONE speller (_ZN6NumberD0Ev),",
+  "action": "extern"
+ },
+ {
+  "file": "port-0.9.1/port/hal/actorport_dtor_bridge.cpp",
+  "line": "actorport_d16t_##Class(s, unused);                                     \\",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/fdr_arm9_fader_seat.cpp",
+  "line": "return ((FdrPredicate)vt[rom_byte / 4])(v->real, 0);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/fdr_arm9_fader_seat.cpp",
+  "line": "return ((FdrPredicate)vt[rom_byte / 4])(view->real, 0);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/int4_rows.cpp",
+  "line": "void BlendModelAnim::Destructor0() { _ZN14BlendModelAnimD0Ev(this); }",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/int4_rows.cpp",
+  "line": "void BlendModelAnim::Destructor1() { _ZN14BlendModelAnimD1Ev(this); }",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/int4_rows.cpp",
+  "line": "void CommonModel::Destructor0()    { _ZN11CommonModelD0Ev(this); }",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/int4_rows.cpp",
+  "line": "void CommonModel::Destructor1()    { _ZN11CommonModelD1Ev(this); }",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/int4_rows.cpp",
+  "line": "void Model::Destructor0()          { _ZN5ModelD0Ev(this); }",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/int4_rows.cpp",
+  "line": "void Model::Destructor1()          { _ZN5ModelD1Ev(this); }",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/int4_rows.cpp",
+  "line": "void ModelAnim2::Destructor0()     { _ZN10ModelAnim2D0Ev(this); }",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/int4_rows.cpp",
+  "line": "void ModelAnim2::Destructor1()     { _ZN10ModelAnim2D1Ev(this); }",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/int4_rows.cpp",
+  "line": "void ModelBase::Destructor0()      { _ZN9ModelBaseD0Ev(this); }",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/int4_rows.cpp",
+  "line": "void ModelBase::Destructor1()      { _ZN9ModelBaseD1Ev(this); }",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/int4_rows.cpp",
+  "line": "void ShadowModel::Destructor0()    { _ZN11ShadowModelD0Ev(this); }",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/int4_rows.cpp",
+  "line": "void ShadowModel::Destructor1()    { _ZN11ShadowModelD1Ev(this); }",
+  "action": "drop_def"
+ },
+ {
+  "file": "port-0.9.1/port/hal/level_boot.cpp",
+  "line": "{ void *d = 0; (void)d; hal_player_trap_slot = (n); return ps_trap(s, d); }",
+  "action": "drop_arg2",
+  "callee": "ps_trap"
+ },
+ {
+  "file": "port-0.9.1/port/hal/level_boot.cpp",
+  "line": "unsigned char data_ov002_0210a83c[];",
+  "action": "extern"
+ },
+ {
+  "file": "port-0.9.1/port/hal/menu_hostimg.cpp",
+  "action": "prepend",
+  "text": "#include <windows.h>  /* gccfix: the PC build gets this through stb_image.h */"
+ },
+ {
+  "file": "port-0.9.1/port/hal/player_bridges.cpp",
+  "line": "((void ***)head)[0][5]))(head, 0, 0);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/player_bridges.cpp",
+  "line": "((void ***)head)[0][5]))(head, 0, c + 0x80);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/player_bridges.cpp",
+  "line": "((void ***)m)[0][5]))(m, 0, c + 0x56c);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/player_bridges.cpp",
+  "line": "((void ***)m4)[0][6]))(m4, 0, (unsigned)(uintptr_t)src,",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/player_states.inc",
+  "line": "case 0x020e0d28: return port_player_st_crazedcrate_cleanup(self, 0);",
+  "action": "drop_arg2",
+  "callee": "port_player_st_crazedcrate_cleanup"
+ },
+ {
+  "file": "port-0.9.1/port/hal/pmf3_cells.cpp",
+  "line": "((PortVSlotAfterFn)(*(void ***)self)[SLOT])(self, 0, code);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/pmf3_cells.cpp",
+  "line": "return ((PortVSlotFn)(*(void ***)self)[SLOT])(self, 0);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/port_d16.h",
+  "action": "prepend",
+  "text": "#include <type_traits>  /* gccfix: port_d16_face picks the face arity */"
+ },
+ {
+  "file": "port-0.9.1/port/hal/port_d16.h",
+  "action": "replace",
+  "line": "return (int)(size_t)Face(self, dummy);",
+  "with": "if constexpr (std::is_invocable_v<decltype(Face), void *>) return (int)(size_t)Face(self); else return (int)(size_t)Face(self, nullptr);  /* gccfix: an x86 shim lost its EDX dummy (one argument) or a plain two-argument face kept it */"
+ },
+ {
+  "file": "port-0.9.1/port/hal/scene_boot.cpp",
+  "line": "const int got_between = ((L2Ea6cSlot)data_0208ea6c[7])(&p, 0);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/scene_boot.cpp",
+  "line": "const int got_end = ((L2Ea6cSlot)data_0208ea6c[6])(&p, 0);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/scene_boot.cpp",
+  "line": "const int got_start = ((L2Ea6cSlot)data_0208ea6c[5])(&p, 0);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/scene_boot.cpp",
+  "line": "return ((L2Ea6cSlot)vt[rom_byte / 4])(s, 0);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/stage_bridges.cpp",
+  "line": "return st_trap(s, d);",
+  "action": "drop_arg2",
+  "callee": "st_trap"
+ },
+ {
+  "file": "port-0.9.1/port/hal/stage_bridges.cpp",
+  "line": "{ void *d = 0; (void)d; hal_stage_trap_slot = (n); return st_trap(s, d); }",
+  "action": "drop_arg2",
+  "callee": "st_trap"
+ },
+ {
+  "file": "port-0.9.1/port/hal/stage_bridges.cpp",
+  "line": "((StageSlot0)_ZTV5Stage[0])(g_stage, 0);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/stage_bridges.cpp",
+  "line": "const int r = ((StageSlot0)_ZTV5Stage[3])(g_stage, 0);",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/hal/sub_actors.cpp",
+  "line": "int __fastcall sa_trap##n(void *s) { g_trap_slot = (n); return sa_trap(s, 0); }",
+  "action": "drop_arg2",
+  "callee": "sa_trap"
+ },
+ {
+  "file": "port-0.9.1/port/unmatched/ActorDerived_Spawn.cpp",
+  "action": "rename",
+  "name": "_ZN7dBase_c5SpawnEjP7fBase_cii",
+  "to": "_ZN7dBase_c5SpawnEjP7fBase_cii__flat"
+ },
+ {
+  "file": "port-0.9.1/port/unmatched/CylinderClsn_Process.cpp",
+  "line": "{ return ((ClsnGetOwnerFn)c->vt[3])(c, 0); }",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/port/unmatched/CylinderClsn_Process.cpp",
+  "line": "{ return ((ClsnGetPosFn)c->vt[2])(c, 0); }",
+  "action": "drop_dummy_args"
+ },
+ {
+  "file": "port-0.9.1/src/_ZN6Player17St_HoldLight_MainEv.cpp",
+  "line": "int var_r4 = 0;",
+  "action": "split_init",
+  "name": "var_r4"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgCoin_c.cpp",
+  "line": "extern void func_ov004_020b0380(int a, int b, int c, int d);",
+  "action": "alias_local",
+  "name": "func_ov004_020b0380"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgCoin_c.cpp",
+  "line": "extern void func_ov004_020b0380(void *fn, int a, int b, int d);",
+  "action": "alias_local",
+  "name": "func_ov004_020b0380"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgCoin_c.cpp",
+  "line": "extern void func_ov006_020ddeb0(void *thiz);",
+  "action": "alias_local",
+  "name": "func_ov006_020ddeb0"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgCoin_c.cpp",
+  "line": "void RenderOamMainScreen(int a0, int a1, int a2, int a3, int a4);",
+  "action": "alias_local",
+  "name": "RenderOamMainScreen"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgLuigi_c.cpp",
+  "line": "extern PMF_f300c data_ov006_02142254[];",
+  "action": "alias_local",
+  "name": "data_ov006_02142254"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgLuigi_c.cpp",
+  "line": "extern int *data_ov006_0213ce70[];",
+  "action": "alias_local",
+  "name": "data_ov006_0213ce70"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgLuigi_c.cpp",
+  "line": "extern int data_0209f60c;",
+  "action": "alias_local",
+  "name": "data_0209f60c"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgLuigi_c.cpp",
+  "line": "extern struct Px_efdf0 data_0209f648[][0xc0];",
+  "action": "alias_local",
+  "name": "data_0209f648"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgLuigi_c.cpp",
+  "line": "extern struct Record_efdac data_0209f648[];",
+  "action": "alias_local",
+  "name": "data_0209f648"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgLuigi_c.cpp",
+  "line": "extern unsigned int data_0209f608;",
+  "action": "alias_local",
+  "name": "data_0209f608"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgLuigi_c.cpp",
+  "line": "extern void *data_ov006_0213abc8[];",
+  "action": "alias_local",
+  "name": "data_ov006_0213abc8"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgLuigi_c.cpp",
+  "line": "extern void MultiCopy_Int(struct Record_efdac *src, void *dst, u32 count);",
+  "action": "alias_local",
+  "name": "MultiCopy_Int"
+ },
+ {
+  "file": "port-0.9.1/src/actors/dScMgLuigi_c.cpp",
+  "line": "extern volatile u32 data_0209f608;",
+  "action": "alias_local",
+  "name": "data_0209f608"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern char* _ZN8dActor_c13ClosestPlayerEv(char*);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c13ClosestPlayerEv"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern int Vec3_HorzLen(const Vector3*);",
+  "action": "alias_local",
+  "name": "Vec3_HorzLen"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern int _ZN8dActor_c15IsPlayerInRangeEi(char* thiz, int r);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c15IsPlayerInRangeEi"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern int _ZN8dActor_c15IsPlayerInRangeEi(char*, int);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c15IsPlayerInRangeEi"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern int func_ov002_020aefa4(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020aefa4"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern int func_ov002_020af1dc(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020af1dc"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern int func_ov002_020af218(void *c, int a);",
+  "action": "alias_local",
+  "name": "func_ov002_020af218"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern int func_ov002_020af218(void*, int);",
+  "action": "alias_local",
+  "name": "func_ov002_020af218"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern int func_ov002_020af3a8(void*);",
+  "action": "alias_local",
+  "name": "func_ov002_020af3a8"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern short Vec3_HorzAngle(void*, void*);",
+  "action": "alias_local",
+  "name": "Vec3_HorzAngle"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern void _ZN5Sound9PlayBank3EjRK7Vector3(unsigned a, void* v);",
+  "action": "alias_local",
+  "name": "_ZN5Sound9PlayBank3EjRK7Vector3"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern void _ZN5Sound9PlayBank3EjRK7Vector3(unsigned int a, void* v);",
+  "action": "alias_local",
+  "name": "_ZN5Sound9PlayBank3EjRK7Vector3"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern void _ZN5Sound9PlayBank3EjRK7Vector3(unsigned int id, void* pos);",
+  "action": "alias_local",
+  "name": "_ZN5Sound9PlayBank3EjRK7Vector3"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern void _ZN5Sound9PlayBank3EjRK7Vector3(unsigned int, const void *);",
+  "action": "alias_local",
+  "name": "_ZN5Sound9PlayBank3EjRK7Vector3"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern void _ZN8dActor_c24KillAndTrackInDeathTableEv(void* thiz);",
+  "action": "alias_local",
+  "name": "_ZN8dActor_c24KillAndTrackInDeathTableEv"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern void func_ov002_020aeee4(void *c);",
+  "action": "alias_local",
+  "name": "func_ov002_020aeee4"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern void func_ov002_020aefb8(void *c);",
+  "action": "alias_local",
+  "name": "func_ov002_020aefb8"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern void func_ov002_020aefb8(void);",
+  "action": "alias_local",
+  "name": "func_ov002_020aefb8"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern void func_ov002_020af3a8(void *c);",
+  "action": "alias_local",
+  "name": "func_ov002_020af3a8"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern void func_ov002_020afc68(char* thiz);",
+  "action": "alias_local",
+  "name": "func_ov002_020afc68"
+ },
+ {
+  "file": "port-0.9.1/src/actors/da1up_c.cpp",
+  "line": "extern void func_ov002_020bdf8c(int);",
+  "action": "alias_local",
+  "name": "func_ov002_020bdf8c"
+ },
+ {
+  "file": "port-0.9.1/src/actors/daYurei_Mucho_c.cpp",
+  "action": "prepend",
+  "text": "extern \"C\" int _ZTV15daYurei_Mucho_c[];  /* gccfix: headers disagree on linkage */"
+ },
+ {
+  "file": "port-0.9.1/src/func_ov002_020e2ea0.cpp",
+  "line": "dBgPi *cr = _ZNK10dBgCh_Actr14GetFloorResultEv((dBgCh_Actr *)(base + 0x380));",
+  "action": "split_init",
+  "name": "cr"
+ },
+ {
+  "file": "port-0.9.1/src/func_ov002_020e2ea0.cpp",
+  "line": "int diff = *(int *)(base + 0x684) - *(int *)(base + 0x60);",
+  "action": "split_init",
+  "name": "diff"
+ },
+ {
+  "file": "port-0.9.1/src/func_ov002_020e2ea0.cpp",
+  "line": "int val = *(int *)(base + 0x664);",
+  "action": "split_init",
+  "name": "val"
+ },
+ {
+  "file": "port-0.9.1/src/func_ov006_020d27dc.c",
+  "line": "char data_ov006_0212e1c0[];",
+  "action": "extern"
+ },
+ {
+  "file": "port-0.9.1/src/func_0201aa50.c",
+  "action": "replace",
+  "line": "extern int func_020599e8(void *a, void *b, void *c, void *d, int e);",
+  "with": "extern void func_020599e8(void *a, long long v, void *d, int e); /* src/func_020599e8.cpp's own signature: AAPCS puts v in r2:r3, so the split words would land one register late (the alarm's fire time took the handler as its high word) */"
+ },
+ {
+  "file": "port-0.9.1/src/func_0201aa50.c",
+  "action": "replace",
+  "line": "return func_020599e8(a, b, c, d, e);",
+  "with": "func_020599e8(a, (long long)(((unsigned long long)(unsigned)c << 32) | (unsigned)b), d, e); return r;"
+ },
+ {
+  "file": "port-0.9.1/port/hal/dsstate_seg.cpp",
+  "line": "__declspec(allocate(\".dsstate$aaa\")) char dsstate_lo = 0;",
+  "action": "replace",
+  "with": "__declspec(allocate(\".dsstate$aaa\")) __declspec(align(4)) char dsstate_lo = 0; __declspec(allocate(\".dsstate$aab\")) char dsstate_lo_pad[3] = {0};  /* the .dsstate run starts word aligned whatever .data left before it: its groups keep the DS spacing at align(1), so their alignment is the run start's (tools/check_ds_align.py) */"
+ },
+ {
+  "file": "port-0.9.1/port/hal/comms_conductor.cpp",
+  "line": "",
+  "action": "ds_head",
+  "name": "data_020a0fa6",
+  "pad": 2
+ },
+ {
+  "file": "port-0.9.1/port/hal/comms_conductor.cpp",
+  "line": "",
+  "action": "ds_head",
+  "name": "data_02099e1c",
+  "pad": 0
+ },
+ {
+  "file": "port-0.9.1/port/hal/comms_conductor.cpp",
+  "line": "",
+  "action": "ds_head",
+  "name": "data_0209d4fc",
+  "pad": 0
+ },
+ {
+  "file": "port-0.9.1/port/hal/comms_conductor.cpp",
+  "line": "",
+  "action": "ds_head",
+  "name": "data_020a0ef0",
+  "pad": 0
+ },
+ {
+  "file": "port-0.9.1/port/hal/comms_conductor.cpp",
+  "line": "",
+  "action": "ds_head",
+  "name": "data_020a0ef8",
+  "pad": 0
+ },
+ {
+  "file": "port-0.9.1/port/hal/comms_conductor.cpp",
+  "line": "",
+  "action": "ds_head",
+  "name": "data_020a0f28",
+  "pad": 0
+ },
+ {
+  "file": "port-0.9.1/port/hal/comms_seam.cpp",
+  "line": "",
+  "action": "ds_head",
+  "name": "data_020a0f94",
+  "pad": 0
+ },
+ {
+  "file": "port-0.9.1/port/hal/comms_conductor.cpp",
+  "line": "",
+  "action": "ds_head",
+  "name": "data_020a1fc0",
+  "pad": 0
+ },
+ {
+  "file": "port-0.9.1/port/hal/comms_conductor.cpp",
+  "line": "",
+  "action": "ds_head",
+  "name": "data_020a0dd8",
+  "pad": 0
+ },
+ {
+  "file": "port-0.9.1/port/hal/comms_conductor.cpp",
+  "line": "",
+  "action": "ds_head",
+  "name": "data_020a0df8",
+  "pad": 0
+ },
+ {
+  "file": "port-0.9.1/port/hal/wm_arm7.cpp",
+  "line": "",
+  "action": "ds_head",
+  "name": "data_020a0f9d",
+  "pad": 1
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_sound_obj.cpp",
+  "line": "if (param1 > 7)",
+  "action": "replace",
+  "with": "if (param1 >= 7) /* 3DS: seven dispatch cells, valid selectors 0..6 */"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/game/actors/d_a_sound_obj.cpp",
+  "line": "SoundObjectCallbackOwner *owner = (SoundObjectCallbackOwner *)this;",
+  "action": "replace",
+  "with": "if (param1 >= 7) { MarkForDestruction(); return 1; } /* 3DS: retain the HAL's malformed-emitter guard */\n    SoundObjectCallbackOwner *owner = (SoundObjectCallbackOwner *)this;"
+ },
+ {
+  "file": "port-0.9.1/port/hal/scene_boot.cpp",
+  "line": "static void *l2_eb2c_msvc_vt[6] = {",
+  "action": "replace",
+  "with": "static void *l2_eb2c_msvc_vt[7] = {\n    (void *)l2_eb2c_view_unreached, /* 3DS: GCC's second destructor word shifts IsAtStart/IsAtEnd to slots 5/6 */"
+ },
+ {
+  "file": "port-0.9.1/src/func_0203e0ac.c",
+  "line": "u16 *p11c4 = (u16 *)data_020a11c4;",
+  "action": "replace",
+  "with": "u16 *p11c4 = (u16 *)(p1154 + 0x70); /* 3DS: aliases the record being written above */"
+ },
+ {
+  "file": "port-0.9.1/src/func_0203e0ac.c",
+  "line": "u16 *p11a0 = (u16 *)data_020a11a0;",
+  "action": "replace",
+  "with": "u16 *p11a0 = (u16 *)(p1154 + 0x4c); /* 3DS: keep overlapping fan-out copies ordered */"
+ },
+ {
+  "file": "port-0.9.1/src/func_0203e0ac.c",
+  "line": "u16 *p117c = (u16 *)data_020a117c;",
+  "action": "replace",
+  "with": "u16 *p117c = (u16 *)(p1154 + 0x28); /* 3DS: publish coordinates and press from the same sample */"
+ },
+ {
+  "file": "port-0.9.1/port/ntr/backup.cpp",
+  "action": "prepend",
+  "line": "",
+  "text": "extern \"C\" int game3ds_save_recover(const char*);\nextern \"C\" int game3ds_save_replace(const char*, const char*);"
+ },
+ {
+  "file": "port-0.9.1/port/ntr/backup.cpp",
+  "action": "replace",
+  "line": "std::FILE *f = std::fopen(g_path, \"rb\");",
+  "with": "game3ds_save_recover(g_path);\n    std::FILE *f = std::fopen(g_path, \"rb\");"
+ },
+ {
+  "file": "port-0.9.1/port/ntr/backup.cpp",
+  "action": "replace",
+  "line": "if (std::rename(tmp, g_path) != 0) {",
+  "with": "if (game3ds_save_replace(tmp, g_path) != 0) {"
+ },
+ {
+  "file": "port-0.9.1/port/ntr/ppu_sub.cpp",
+  "action": "replace",
+  "line": "void scan_fast(SubFramebuffer &fb, uint32_t dispcnt, const uint8_t *skip,",
+  "with": "#include \"sub_scan_single.inl\"\nvoid scan_fast(SubFramebuffer &fb, uint32_t dispcnt, const uint8_t *skip,"
+ },
+ {
+  "file": "port-0.9.1/port/ntr/ppu_sub.cpp",
+  "action": "replace",
+  "line": "long ppu_sub_scan_hits() { return g_scan_hits; }",
+  "with": "long ppu_sub_scan_hits() { return g_scan_hits; }\n// sub_scan_single.inl's caches back to the heap (game/sub_async.cpp game3ds_sub_release)\nsize_t ppu_sub_release_caches() { return sub_caches_release(); }"
+ },
+ {
+  "file": "port-0.9.1/port/ntr/ppu_sub.cpp",
+  "action": "replace",
+  "line": "uint32_t lcol[4][256];",
+  "with": "if (scan_single_enabled() && !win.any && nflat <= 1 && (bld.off || bld.mode == 0 || ((bld.mode == 2 || bld.mode == 3) && bld.evy == 0))) {\n        const int bg_id = nflat ? flat[0] : 5;\n        const BgLayer *bg = nflat ? &bgs[bg_id] : nullptr;\n        if (br.factor && (br.mode == 1 || br.mode == 2))\n            scan_single_bg<true>(fb, bg, bg_id, pal32, backdrop, bld, br, obj);\n        else\n            scan_single_bg<false>(fb, bg, bg_id, pal32, backdrop, bld, br, obj);\n        return;\n    }\n    if (scan_multi_enabled() && !win.any && (bld.off || bld.mode != 1)) {\n        if (br.factor && (br.mode == 1 || br.mode == 2))\n            scan_multi_bg<true>(fb, bgs, flat, fprio, nflat, pal32, backdrop, bld, br, obj);\n        else\n            scan_multi_bg<false>(fb, bgs, flat, fprio, nflat, pal32, backdrop, bld, br, obj);\n        return;\n    }\n    if (scan_multi_enabled() && !win.any && !bld.off && bld.mode == 1) {\n        if (br.factor && (br.mode == 1 || br.mode == 2))\n            scan_multi_alpha<true>(fb, bgs, flat, fprio, nflat, pal32, backdrop, bd_fx, bld, br, obj);\n        else\n            scan_multi_alpha<false>(fb, bgs, flat, fprio, nflat, pal32, backdrop, bd_fx, bld, br, obj);\n        return;\n    }\n    ++game3ds_sub_paths[3];   /* the general walk, for the [perf] sub_async line */\n    uint32_t lcol[4][256];"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "for (i = 0; i < numNodes; i++) {",
+  "action": "replace",
+  "with": "for (i = 0; i < numNodes && i < 3; i++) { /* 3DS: nodes[3] holds three; longer paths smashed the caller's saved PC (BoB Chain Chomp post, ff719000) */"
+ },
+ {
+  "file": "port-0.9.1/port/hal/sub_screen.cpp",
+  "line": "if (g_on || g_force_panel.load() || hal_menu_draw_live() || menu_bigmap_up()) ntr::ppu_scanout_sub(g_sub);   /* a live menu, or the big map (MAP1), forces its own scan-out */",
+  "action": "replace",
+  "with": "if (g_on || g_force_panel.load() || hal_menu_draw_live() || menu_bigmap_up()) { void game3ds_sub_scanout(ntr::SubFramebuffer &, int); /* 3DS: game/sub_async.cpp, core 2 */ game3ds_sub_scanout(g_sub, g_on && !g_force_panel.load() && !hal_menu_draw_live() && !menu_bigmap_up()); }"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "if (*(u32*)(self + 0x670) != 0xff) {",
+  "action": "replace",
+  "with": "if (*(u32*)(self + 0x670) != 0xff && data_020a0d84[0]) { /* 3DS: a level with no path table (Whomp Fortress) can still name path 0; the DS reads ITCM at address 0, the 3DS faults. No table, no push. */"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "extern s32 data_ov002_020ff200[];",
+  "action": "replace",
+  "with": "extern s32 data_ov002_020ff200[]; extern int data_020a0d84[];   /* 3DS: the path table, checked below */"
+ },
+ {
+  "file": "port-0.9.1/port/hal/mmc_vtable.cpp",
+  "line": "extern \"C\" void hal_fill_moving_mesh_collider_vtable(void)",
+  "action": "replace",
+  "with": "extern \"C\" void hal_fill_moving_mesh_collider_vtable(void) {} /* 3DS: GCC's _ZTV10dBgW_KcMbg already holds every override in Itanium order; this fill writes MSVC slot numbers into it (slot 3 GetSurfaceInfo <- GetNormal, 4 GetNormal <- GetTriangleOrigin, 10 TransformPos <- GetAngularVelY): BoB post floor path id 0, riders flung across the level */ __attribute__((unused)) static void hal_fill_moving_mesh_collider_vtable_msvc(void)"
+ },
+ {
+  "file": "port-0.9.1/port/hal/level_boot.cpp",
+  "line": "data_0209ee90[0x44 / 4] = 0x1000;",
+  "action": "replace",
+  "with": "data_0209ee90[0x44 / 4] = 0x100;   /* 3DS: the ROM's own value (func_0201a054: data_0209ee90.f44 = 0x100). scaleW scales the whole clip vector, so the picture is unchanged, but fog reads W: at 0x1000 every W was 16x the DS's and BoB drew a near-uniform grey veil (melonDS: haze only on far hills) */"
+ },
+ {
+  "file": "port-0.9.1/port/hal/sub_screen.cpp",
+  "line": "unsigned int *hal_sub_screen_stacked_image(const unsigned int *top)",
+  "action": "replace",
+  "with": "extern \"C\" const unsigned int *hal_sub_screen_b_direct(void) { /* 3DS (port3ds/game/main_game.cpp engine_b_picture): on a plain stacked layout (no headroom, no seam, the panel at scale 1: the 4:3 extent, or the widescreen build's with the panel pillarboxed at pan_x0; a gap band is allowed, as the minigames have one: the 3DS's screens are apart already and the card never shows the band, which the compose writes only in its own rows, so the panel is still g_sub verbatim) engine B's panel in the stacked image is g_sub verbatim, so the card reads it in place and the whole-image compose (both halves, ~2.5 ms a frame on hardware) is skipped. Null otherwise, and on the first frame of a new layout generation, which takes the full path once for its log and selftest. */ static unsigned seen = (unsigned)-1; if (!hal_sub_screen_stacked() || !g_ready) return 0; const unsigned gen = hal_screen_layout_generation(); if (gen != seen) { seen = gen; return 0; } const ntr::StackLayout &lay = *hal_screen_layout(); if (lay.head_h || lay.seam || lay.pan_w != ntr::SUB_W || lay.pan_h != ntr::SUB_H || lay.w != ntr::active_w || ntr::active_h != ntr::SUB_H) return 0; return &g_sub.px[0][0]; } unsigned int *hal_sub_screen_stacked_image(const unsigned int *top)"
+ },
+ {
+  "file": "port-0.9.1/port/hal/scene_boot.cpp",
+  "line": "static ntr::Framebuffer scn_fb;",
+  "action": "replace",
+  "with": "extern \"C\" ntr::Framebuffer *game3ds_scene_fb(void);  /* 3DS: in linear memory (game/main_game.cpp), so the card's present hands it to the GPU's transfer engine */\n#define scn_fb (*game3ds_scene_fb())"
+ },
+ {
+  "file": "port-0.9.1/port/ntr/ppu_sub.cpp",
+  "action": "replace",
+  "line": "void raster_obj(uint32_t dispcnt, const uint8_t *skip, ObjPixel (*obj)[256],",
+  "with": "#include \"sub_obj_fast.inl\"\nvoid raster_obj(uint32_t dispcnt, const uint8_t *skip, ObjPixel (*obj)[256],"
+ },
+ {
+  "file": "port-0.9.1/port/ntr/ppu_sub.cpp",
+  "action": "replace",
+  "line": "const uint8_t prio = (a2 >> 10) & 3;",
+  "with": "const uint8_t prio = (a2 >> 10) & 3;\n        if (!affine && !is_bmp && !is_win && obj_fast_enabled()) {  /* 3DS: src/sub_obj_fast.inl */\n            obj_plain(obj, x, y, w, h, hflip, vflip, c256, tile, pal, prio, objmode == 1, map1d, boundary, objext);\n            continue;\n        }\n        if (affine && !is_bmp && !is_win && obj_fast_enabled()) {  /* 3DS: src/sub_obj_fast.inl */\n            obj_affine(obj, oam_b, (a1 >> 9) & 0x1F, x, y, w, h, dbl, c256, tile, pal, prio, objmode == 1, map1d, boundary, objext);\n            continue;\n        }"
+ },
+ {
+  "file": "port-0.9.1/port/hal/scene_boot.cpp",
+  "action": "replace",
+  "line": "void *obj = port_scene_boot(scene);",
+  "with": "extern int game3ds_initial_scene(int); /* 3DS: main_game.cpp, the DS's Nintendo logo (BootScene) before the title */\n    void *obj = port_scene_boot(game3ds_initial_scene(scene));"
+ },
+ {
+  "file": "port-0.9.1/src/func_ov060_02111cc0.cpp",
+  "action": "replace",
+  "line": "#ifdef _MSC_VER",
+  "with": "#if 1  /* 3DS: the PC arm. The GCC arm is mwccarm's (the ROM's SetAnim flags ride in from the caller's r2); under GCC its `int a;` is uninitialised and Bowser's post-bomb landing animation looped, so his defeat talk never came */"
+ },
+ {
+  "file": "port-0.9.1/src/func_ov060_02111cc0.cpp",
+  "action": "replace",
+  "line": "#ifndef _MSC_VER",
+  "with": "#if 0  /* 3DS: the PC arm (above) */"
+ },
+ {
+  "file": "port-0.9.1/src/func_ov060_02114f88.c",
+  "action": "replace",
+  "line": "#ifdef _MSC_VER",
+  "with": "#if 1  /* 3DS: the PC arm, the explicit flags 0 (src/func_ov060_02111cc0.cpp takes them as a parameter on the 3DS too) */"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/dScMgD3DBase_c.cpp",
+  "line": "func_02012718(a, b + 0x80000);",
+  "action": "replace",
+  "with": "func_02012718(a, b + 0x80000);\n    return 0;  /* 3DS: GCC takes flowing off the end of a non-void function as unreachable and emits no return: Bounce and Pounce ran on into the next function */"
+ },
+ {
+  "file": "build-pcprobe/host-src/src/actors/Player.cpp",
+  "line": "ret = func_ov002_020c2138(c);",
+  "action": "replace",
+  "with": "ret = func_ov002_020c2138(c);\n    return ret;  /* 3DS: the ROM returns the last call's r0 here; return_at_end takes the `if (ret != 0) return ret;` before the closing brace for a return, and GCC makes flowing off the end unreachable */"
+ }
+]

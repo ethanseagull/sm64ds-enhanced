@@ -1,0 +1,45 @@
+From c127dcd9c91803c1b168707aa79cc4647131e0a3 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 04:44:05 -0700
+Subject: [PATCH 10/13] hal: HalFaderWipe's D0 word is MSVC-only
+
+MSVC gives a virtual destructor one vtable slot, so the ROM's D0 needed its
+own declared word at 0x04. GCC gives it two (D1 at 0x00, D0 at 0x04), the
+ROM's layout, and the extra declaration pushed every slot below down one:
+AdvanceFade's word (0x08, func_02018efc's fade step) became the deleting
+destructor, and the first fade step after a level change freed a static
+wipe into the game heap. The declaration is under _MSC_VER now.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/fader_wipes.cpp | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/port/hal/fader_wipes.cpp b/port/hal/fader_wipes.cpp
+index 6cd99bcb0..714c0a06f 100644
+--- a/port/hal/fader_wipes.cpp
++++ b/port/hal/fader_wipes.cpp
+@@ -301,6 +301,12 @@ struct HalFaderWipe {
+     }
+ 
+     virtual ~HalFaderWipe() {}                       /* 0x00  ROM D1 */
++#if defined(_MSC_VER)
++    /* MSVC gives the destructor ONE slot, so the ROM's D0 needs its own word
++       here. GCC (the 3DS) gives it two -- D1 at 0x00, D0 at 0x04 -- exactly the
++       ROM's, and a second declaration would push every slot below down one:
++       AdvanceFade's word (0x08, func_02018efc's dispatch) became this, and the
++       first fade step after a level change deleted a static wipe. */
+     /* 0x04  ROM D0.  WAS AN EMPTY STUB and the slot table above still says
+        what it says: "nobody on host".  It is the ROM's body now (lane SEAT2),
+        and that changes nothing about what runs, because no dispatch site in
+@@ -315,6 +321,7 @@ struct HalFaderWipe {
+         hal_wipe_note("DtorDeleting (ROM D0, the matched body)", this);
+         _ZN9FaderWipeD0Ev(this);
+     }
++#endif
+     virtual int AdvanceFade()                        /* 0x08 */
+     {
+         /* Driven advance (the frame loop's port_frame_phase2) STEPS the
+-- 
+2.55.0.windows.5
+

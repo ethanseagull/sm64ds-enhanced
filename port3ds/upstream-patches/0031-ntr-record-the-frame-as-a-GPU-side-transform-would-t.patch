@@ -1,0 +1,365 @@
+From e191a56ff38380420b6e3379da576caf784dab6e Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 21:27:06 -0700
+Subject: [PATCH] ntr: record the frame as a GPU-side transform would take it
+ (SM64DS_GXREC)
+
+With SM64DS_GXREC=1, beside the polygon list: each vertex as the display list gave it (model x, y, z, its colour and texels, the id of the matrices it rode), each triangle as three indices from push_vertex's own assembly, each run of triangles under one state, and per matrix id what project() and the emit path read (position and projection matrices, viewport, menu-sprite bracket). gx_render materialises the record through project() and emit_tri and compares it with the list. Off by default; nothing changes without the variable.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp | 299 +++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 297 insertions(+), 2 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 48908caaf..da748e6d8 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -1768,11 +1768,134 @@ int smooth_try(const GxVertex &a, const GxVertex &b, const GxVertex &c,
+     return 1;
+ }
+ 
++/* THE FRAME AS A GPU-SIDE TRANSFORM WOULD TAKE IT (the 3DS port's step 5,
++   port3ds 3ds-port-plan.md "STEP 5"). With SM64DS_GXREC=1, beside the polygon
++   list, gx.cpp records what a card that transforms vertices itself needs:
++     - each vertex as the display list gave it (model x, y, z), with the
++       colour and texel coordinates latched for it and the id of the matrices
++       it rode (a new id at the first vertex after the position or projection
++       matrix, the viewport or the menu-sprite bracket changed);
++     - each triangle as three indices into those vertices, taken from
++       push_vertex's own assembly (the strip rows emit_tri is handed);
++     - each run of triangles under one state: what fill_tri_state reads;
++     - for each id, what project() and the emit path read: the position and
++       projection matrices, the viewport, the menu-sprite bracket.
++   rec_materialise turns the record back into triangles through project()
++   and emit_tri themselves, and gx_render compares the two (rec_check): equal
++   but for the normals, which the record does not carry (they are the
++   smoother's, and a frame with the smoother on is not recorded). This is
++   step 5.1: the record proved whole before a card draws from it. */
++struct RecVtx {
++    int16_t x, y, z;
++    uint16_t id;           // the matrices it rode (Rec::mtx)
++    uint32_t color;        // 0xAARRGGBB, as project() latches it
++    float u, v;            // texels, after texgen
++};
++struct RecMtx {
++    Mat pos, proj;
++    int vp[4];             // g.vp_x, vp_y, vp_w, vp_h
++    int sprite;            // g_menu_sprite
++};
++struct RecRun {
++    uint32_t first;        // its first triangle
++    const uint32_t *tex_rgba;
++    int tw, th;
++    uint8_t tex_wrap, tex_scale;
++    uint32_t tex_id, poly_attr, teximage;
++};
++struct Rec {
++    int on;                // this frame is being recorded
++    int bad;               // why recording stopped this frame (0 it did not)
++    uint32_t strip_base;   // the record index of g.strip[0]
++    std::vector<RecVtx> v;
++    std::vector<uint32_t> idx;
++    std::vector<RecRun> runs;
++    std::vector<RecMtx> mtx;
++};
++Rec g_rec;
++enum { REC_OK = 0, REC_IDS, REC_STRIP };
++
++int rec_wanted() {
++    static int v = -1;
++    if (v < 0) {
++        const char *e = getenv("SM64DS_GXREC");
++        v = (e && *e && *e != '0') ? 1 : 0;
++    }
++    return v;
++}
++
++// gx_reset: a new frame's record. Not with the smoother (its grids and
++// sub-triangles are not push_vertex's), the motion recorder (its replays
++// re-enter the emit path) or the star-geometry probe on.
++void rec_frame_begin() {
++    Rec &R = g_rec;
++    R.v.clear();
++    R.idx.clear();
++    R.runs.clear();
++    R.mtx.clear();
++    R.bad = REC_OK;
++    R.on = rec_wanted() && smooth_lvl() <= 0 && !g_ip_armed && !g_stargeo.on;
++}
++
++void rec_stop(int why) {
++    g_rec.on = 0;
++    g_rec.bad = why;
++}
++
++// vertex(), before push_vertex: `new_id` is step 5's matrix-dirty flag.
++inline void rec_vertex(int16_t x, int16_t y, int16_t z, bool new_id) {
++    Rec &R = g_rec;
++    if (new_id || R.mtx.empty()) {
++        /* the frame's first menu-wide question may set the viewport, and in
++           the list's own flow it is asked inside this vertex's project() */
++        (void)menu_wide();
++        if (R.mtx.size() >= 0xFFFF) { rec_stop(REC_IDS); return; }
++        RecMtx m;
++        m.pos = g.pos;
++        m.proj = g.proj;
++        m.vp[0] = g.vp_x; m.vp[1] = g.vp_y; m.vp[2] = g.vp_w; m.vp[3] = g.vp_h;
++        m.sprite = g_menu_sprite;
++        R.mtx.push_back(m);
++    }
++    if (g.strip.empty()) R.strip_base = (uint32_t)R.v.size();
++    R.v.push_back({x, y, z, (uint16_t)(R.mtx.size() - 1), g.color, g.u, g.v});
++}
++
++// emit_tri: the three corners must be rows of the strip push_vertex keeps.
++inline void rec_tri(const GxVertex &a, const GxVertex &b, const GxVertex &c, bool new_run) {
++    Rec &R = g_rec;
++    const GxVertex *s = g.strip.data();
++    const size_t n = g.strip.size();
++    const size_t ia = (size_t)(&a - s), ib = (size_t)(&b - s), ic = (size_t)(&c - s);
++    if (!s || ia >= n || ib >= n || ic >= n || R.strip_base + n > R.v.size()) {
++        rec_stop(REC_STRIP);
++        return;
++    }
++    if (new_run || R.runs.empty()) {
++        RecRun r;
++        r.first = (uint32_t)(R.idx.size() / 3);
++        r.tex_rgba = g.tex_rgba;
++        r.tw = g.tw;
++        r.th = g.th;
++        r.tex_wrap = g.tex_wrap;
++        r.tex_scale = g.tex_scale;
++        r.tex_id = g.tex_id;
++        r.poly_attr = g.poly_attr;
++        r.teximage = g_teximage;
++        R.runs.push_back(r);
++    }
++    R.idx.push_back(R.strip_base + (uint32_t)ia);
++    R.idx.push_back(R.strip_base + (uint32_t)ib);
++    R.idx.push_back(R.strip_base + (uint32_t)ic);
++}
++
+ void emit_tri(const GxVertex &a, const GxVertex &b, const GxVertex &c,
+               const GxRaw &ra, const GxRaw &rb, const GxRaw &rc) {
+     ++g_smooth_in;   // SMOOTH_COUNT_IN, summed (see per_frame_answers_reset)
+     ++g_s5_frame[S5_TRIS];
+-    if (g_s5_state_dirty) { ++g_s5_frame[S5_RUNS]; g_s5_state_dirty = false; }
++    const bool new_run = g_s5_state_dirty;
++    if (new_run) { ++g_s5_frame[S5_RUNS]; g_s5_state_dirty = false; }
++    if (g_rec.on) rec_tri(a, b, c, new_run);
+     /* OFF IS ONE COMPARE. smooth_level() is a load of a file-scope int that
+        walk_window sets once at boot; with the setting absent it is 0 and this
+        function is the same call it always was. */
+@@ -1880,7 +2003,9 @@ void vertex(int16_t x, int16_t y, int16_t z) {
+     g.vx = x; g.vy = y; g.vz = z;
+     if (g.prim < 0) return;
+     ++g_s5_frame[S5_VERTS];
+-    if (g_s5_mtx_dirty) { ++g_s5_frame[S5_MTX]; g_s5_mtx_dirty = false; }
++    const bool new_id = g_s5_mtx_dirty;
++    if (new_id) { ++g_s5_frame[S5_MTX]; g_s5_mtx_dirty = false; }
++    if (g_rec.on) rec_vertex(x, y, z, new_id);
+     /* The raw half of the vertex, for the shape store. With the setting
+        absent it is filled with a pair of generations that can never match,
+        so the store is unreachable rather than merely unused. */
+@@ -1898,6 +2023,173 @@ void vertex(int16_t x, int16_t y, int16_t z) {
+     push_vertex(project(x, y, z), &r);
+ }
+ 
++/* THE RECORD BACK INTO TRIANGLES (step 5, see struct Rec): every vertex
++   through project() under the matrices its id recorded, then every triangle
++   through emit_tri under its run's state, with the projection and viewport of
++   the vertex that completed it (push_vertex emits a triangle at its newest
++   vertex, the largest of its three indices). What those read is put back
++   afterwards, and so are the counters they bump. `out` gets the triangles. */
++void rec_materialise(std::vector<GxTriangle> &out) {
++    Rec &R = g_rec;
++    const Mat pos = g.pos, proj = g.proj;
++    const int vp[4] = {g.vp_x, g.vp_y, g.vp_w, g.vp_h};
++    const int sprite = g_menu_sprite;
++    const uint32_t color = g.color;
++    const float u = g.u, v = g.v;
++    const int normal_live = g.normal_live;
++    const uint32_t *tex_rgba = g.tex_rgba;
++    const int tw = g.tw, th = g.th;
++    const uint8_t tex_wrap = g.tex_wrap, tex_scale = g.tex_scale;
++    const uint32_t tex_id = g.tex_id, poly_attr = g.poly_attr, teximage = g_teximage;
++    const bool ortho = g_frame_ortho;
++    unsigned s5[S5_N];
++    std::memcpy(s5, g_s5_frame, sizeof s5);
++    const bool s5_state = g_s5_state_dirty;
++    const uint64_t smooth_in = g_smooth_in, smooth_out = g_smooth_out;
++    const int on = R.on;
++    R.on = 0;
++
++    auto ride = [&](uint16_t id) {
++        const RecMtx &m = R.mtx[id];
++        g.pos = m.pos;
++        g.proj = m.proj;
++        g.vp_x = m.vp[0]; g.vp_y = m.vp[1]; g.vp_w = m.vp[2]; g.vp_h = m.vp[3];
++        g_menu_sprite = m.sprite;
++    };
++    static std::vector<GxVertex> pv;
++    pv.resize(R.v.size());
++    g.normal_live = 0;
++    for (size_t k = 0; k < R.v.size(); ++k) {
++        const RecVtx &rv = R.v[k];
++        ride(rv.id);
++        g.color = rv.color;
++        g.u = rv.u;
++        g.v = rv.v;
++        pv[k] = project(rv.x, rv.y, rv.z);
++    }
++    std::vector<GxTriangle> keep;
++    keep.swap(g.tris);
++    out.clear();
++    g.tris.swap(out);
++    const size_t ntri = R.idx.size() / 3;
++    for (size_t r = 0; r < R.runs.size(); ++r) {
++        const RecRun &run = R.runs[r];
++        g.tex_rgba = run.tex_rgba;
++        g.tw = run.tw;
++        g.th = run.th;
++        g.tex_wrap = run.tex_wrap;
++        g.tex_scale = run.tex_scale;
++        g.tex_id = run.tex_id;
++        g.poly_attr = run.poly_attr;
++        g_teximage = run.teximage;
++        const size_t end = r + 1 < R.runs.size() ? R.runs[r + 1].first : ntri;
++        for (size_t t = run.first; t < end; ++t) {
++            const uint32_t a = R.idx[t * 3], b = R.idx[t * 3 + 1], c = R.idx[t * 3 + 2];
++            const uint32_t last = a > b ? (a > c ? a : c) : (b > c ? b : c);
++            ride(R.v[last].id);
++            emit_tri(pv[a], pv[b], pv[c], g_raw_dead, g_raw_dead, g_raw_dead);
++        }
++    }
++    g.tris.swap(out);
++    g.tris.swap(keep);
++
++    g.pos = pos;
++    g.proj = proj;
++    g.vp_x = vp[0]; g.vp_y = vp[1]; g.vp_w = vp[2]; g.vp_h = vp[3];
++    g_menu_sprite = sprite;
++    g.color = color;
++    g.u = u;
++    g.v = v;
++    g.normal_live = normal_live;
++    g.tex_rgba = tex_rgba;
++    g.tw = tw;
++    g.th = th;
++    g.tex_wrap = tex_wrap;
++    g.tex_scale = tex_scale;
++    g.tex_id = tex_id;
++    g.poly_attr = poly_attr;
++    g_teximage = teximage;
++    g_frame_ortho = ortho;
++    std::memcpy(g_s5_frame, s5, sizeof s5);
++    g_s5_state_dirty = s5_state;
++    g_smooth_in = smooth_in;
++    g_smooth_out = smooth_out;
++    R.on = on;
++}
++
++// Two triangles alike in everything the card and the raster read (the
++// normals, which only the smoother reads, aside); floats compared bit for bit.
++bool rec_same_tri(const GxTriangle &p, const GxTriangle &q) {
++    for (int k = 0; k < 3; ++k) {
++        const GxVertex &a = p.v[k], &b = q.v[k];
++        const float fa[10] = {a.x, a.y, a.z, a.w, a.u, a.v, a.vx, a.vy, a.vz, a.vw};
++        const float fb[10] = {b.x, b.y, b.z, b.w, b.u, b.v, b.vx, b.vy, b.vz, b.vw};
++        if (std::memcmp(fa, fb, sizeof fa) != 0 || a.color != b.color) return false;
++    }
++    return p.tex == q.tex && p.tw == q.tw && p.th == q.th && p.tex_scale == q.tex_scale &&
++           p.tex_id == q.tex_id && p.cull == q.cull && p.alpha == q.alpha && p.wrap == q.wrap &&
++           p.translucent == q.translucent && p.mode == q.mode && p.polyid == q.polyid &&
++           p.depth_eq == q.depth_eq && p.fog == q.fog && p.dbg_tex == q.dbg_tex;
++}
++
++/* gx_render, SM64DS_GXREC=1: the frame's record materialised and compared
++   with its polygon list. Every 120 frames a [gxrec] line: how many were
++   recorded and alike, and what was in them. */
++void rec_check() {
++    if (!rec_wanted()) return;
++    static unsigned frames, recorded, alike, differ, stopped[3], shown;
++    static unsigned long long verts, tris, runs, ids;
++    static std::vector<GxTriangle> m;
++    ++frames;
++    if (!g_rec.on) {
++        ++stopped[g_rec.bad < 3 ? g_rec.bad : 0];
++    } else {
++        ++recorded;
++        rec_materialise(m);
++        verts += g_rec.v.size();
++        tris += g_rec.idx.size() / 3;
++        runs += g_rec.runs.size();
++        ids += g_rec.mtx.size();
++        size_t bad = m.size() == g.tris.size() ? 0 : 1, first = (size_t)-1;
++        const size_t n = m.size() < g.tris.size() ? m.size() : g.tris.size();
++        for (size_t i = 0; i < n; ++i)
++            if (!rec_same_tri(m[i], g.tris[i])) {
++                if (first == (size_t)-1) first = i;
++                ++bad;
++            }
++        if (bad) {
++            ++differ;
++            if (shown < 8) {
++                ++shown;
++                std::fprintf(stderr, "[gxrec] DIFFER: list %u tris, record %u; %u unlike, first at %d\n",
++                             (unsigned)g.tris.size(), (unsigned)m.size(), (unsigned)bad,
++                             first == (size_t)-1 ? -1 : (int)first);
++                if (first != (size_t)-1) {
++                    const GxTriangle &p = g.tris[first], &q = m[first];
++                    std::fprintf(stderr, "[gxrec]   list   v0 (%.3f %.3f %.5f %.3f) uv (%.2f %.2f) c %08lx tex %p attr a%u m%u id%u\n"
++                                 "[gxrec]   record v0 (%.3f %.3f %.5f %.3f) uv (%.2f %.2f) c %08lx tex %p attr a%u m%u id%u\n",
++                                 p.v[0].x, p.v[0].y, p.v[0].z, p.v[0].w, p.v[0].u, p.v[0].v,
++                                 (unsigned long)p.v[0].color, (const void *)p.tex, p.alpha, p.mode, p.polyid,
++                                 q.v[0].x, q.v[0].y, q.v[0].z, q.v[0].w, q.v[0].u, q.v[0].v,
++                                 (unsigned long)q.v[0].color, (const void *)q.tex, q.alpha, q.mode, q.polyid);
++                }
++            }
++        } else {
++            ++alike;
++        }
++    }
++    if (frames % 120 == 0) {
++        const double r = recorded ? (double)recorded : 1.0;
++        std::fprintf(stderr, "[gxrec] frames %u-%u: %u recorded, %u alike, %u differ; not recorded "
++                     "(off %u, ids %u, strip %u); per recorded frame verts %.0f tris %.0f runs %.0f ids %.0f\n",
++                     frames - 119, frames, recorded, alike, differ, stopped[0], stopped[1],
++                     stopped[2], verts / r, tris / r, runs / r, ids / r);
++        recorded = alike = differ = 0;
++        stopped[0] = stopped[1] = stopped[2] = 0;
++        verts = tris = runs = ids = 0;
++    }
++}
++
+ // --- command execution ------------------------------------------------------
+ void load_mtx(Mat &dst, const uint32_t *p, int n) {
+     Mat m = Mat::identity();
+@@ -3335,6 +3627,7 @@ void gx_reset() {
+     gxstat_publish();
+     /* run interp1: a frame's stream opens here, so its record does too. */
+     if (g_ip_armed && !g_ip_open) ip_rec_begin();
++    rec_frame_begin();   // and step 5's (SM64DS_GXREC)
+ }
+ 
+ void gx_debug_proj(float out[16]) {
+@@ -4570,6 +4863,7 @@ static void clear_fill_classic(Framebuffer &fb)
+ void gx_set_menu_wide_cb(bool (*cb)(float *zoom, float *dy)) { g_menu_wide_cb = cb; }
+ void gx_menu_sprite(int on) {
+     g_menu_sprite = on;
++    g_s5_mtx_dirty = true;   // view_to_clip reads the bracket: a new matrix id
+     /* MENUINTERP2: the bracket is part of the frame's stream, so a replay zooms the page model and not the sprite objects */
+     if (g_ip_rec) { const uint32_t v = on ? 1u : 0u; ip_push(IPK_SPRITE, 0, 1, &v); }
+ }
+@@ -6350,6 +6644,7 @@ void gx_render(Framebuffer &fb) {
+         !(grid_env_ok() && g_gpu_opaque && !ab_mode() && gpu_grid_probe()))
+         grids_materialize_w(3);
+     capture_drill(false);
++    rec_check();   /* step 5.1, SM64DS_GXREC=1: the record against the list */
+     /* run interp1: what reached the raster is the frame; seal its record. */
+     if (g_ip_rec) ip_rec_seal();
+     /* LAST FRAME'S PRE-SMOOTHING COPY STOPS BEING THIS FRAME'S HERE, before
+-- 
+2.49.0
+

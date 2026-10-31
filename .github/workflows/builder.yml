@@ -1,0 +1,57 @@
+# The release's SM64DS-Enhanced-Builder.exe, built here from this repository's
+# source (port3ds/builder/build_exe.py) so anyone can see what went into it.
+# Once the SignPath project is set up (the SIGNPATH_ORGANIZATION_ID variable
+# and the SIGNPATH_API_TOKEN secret), each build is sent for signing and the
+# signed .exe is kept as the builder-exe artifact; until then the unsigned one
+# is. port3ds/builder/release.py puts it in the release's zip.
+name: Builder
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Build the .exe
+        run: python -I port3ds/builder/build_exe.py --label "${{ github.ref_name }}" --out out/SM64DS-Enhanced-Builder.exe
+
+      - name: Keep the unsigned .exe
+        id: unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: builder-exe-unsigned
+          path: out/SM64DS-Enhanced-Builder.exe
+          if-no-files-found: error
+
+      - name: Sign it (SignPath)
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: sm64ds-enhanced
+          signing-policy-slug: release-signing
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Keep the signed .exe
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: builder-exe
+          path: signed/SM64DS-Enhanced-Builder.exe
+          if-no-files-found: error

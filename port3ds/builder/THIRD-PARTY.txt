@@ -1,0 +1,20 @@
+Super Mario 64 DS Enhanced builder: what's in it
+
+None of Super Mario 64 DS is in this program. Everything of the game in the
+.cia it makes comes from the dump you give it, on your PC, so the .cia is for
+your own consoles. Please don't share it.
+
+Super Mario 64 DS is (c) Nintendo. This is a fan project and isn't affiliated
+with Nintendo.
+
+- game3ds.elf: the 3DS port, built on tangosdev's Super Mario 64 DS
+  decompilation and PC port (MIT, below). It includes libctru and citro3d
+  (devkitPro, zlib, below) and SIMDe (MIT, below).
+- The builder's extractor (Extract.cs) is the PC port's extract_assets.ps1
+  in C# (same project and licence).
+- makerom.exe 0.19.0, from Project_CTR: https://github.com/3DSGuy/Project_CTR
+  (MIT, below).
+- bannertool.exe 1.2.3: https://github.com/carstene1ns/3ds-bannertool
+  (MIT, below).
+- banner.wav (the HOME Menu sound) and music.mp3 (the builder's music, a
+  lullaby remake): made by ethan.

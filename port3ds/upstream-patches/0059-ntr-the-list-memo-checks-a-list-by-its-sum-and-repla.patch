@@ -1,0 +1,162 @@
+From 2e43cd6f6f0fe6dfea90f7badb5089fd3080c077 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 21:56:14 -0700
+Subject: [PATCH] ntr: the list memo checks a list by its sum and replays in
+ bulk
+
+- A list is matched by a two-lane 64-bit sum of its words (lm_sum) instead
+  of a word-for-word compare against a kept copy: one read of the list a
+  frame, not two (an Old 3DS has 16 KB of data cache and no L2), and no
+  copies kept.
+- lm_replay copies the vertices in (a resize zeroed them first) and puts a
+  segment's triangles after its first into that run at once: rec_lean_tri's
+  steps without a call and three push_backs a triangle.
+
+Azahar, the 3DS port's Old 3DS mode, levels 1 and 6 with the memo's verify
+mode (each list replayed and decoded, compared): 0 mismatches.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp | 78 +++++++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 63 insertions(+), 15 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 969e8c79f..def45ebe2 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -3488,7 +3488,7 @@ struct LmEntry {
+     uint8_t ok = 0, tries = 0;
+     uint8_t misses = 0, skip = 0;     // key misses in a row (a lit list that moves), and the backoff
+     uint32_t reads = 0, writes = 0;
+-    std::vector<uint32_t> words;
++    uint64_t sum = 0;                 // lm_sum of its words
+     std::vector<RecVtx> v;            // the vertices (their id is the live one's at replay)
+     std::vector<uint16_t> tri;        // corners, from the list's first vertex
+     // segment k: live command live_cmd[k - 1] (none for the first) with its
+@@ -3510,6 +3510,22 @@ struct LmEntry {
+ };
+ std::unordered_map<const uint32_t *, LmEntry> g_lm_map;
+ 
++/* A LIST'S WORDS AS A NUMBER, not a copy compared word for word: the memo
++   compared ~16,000 words a course frame against copies of every list (~0.5 MB
++   of heap), reading both from memory each frame, which on an Old 3DS (16 KB
++   of data cache, no L2) is two cache misses a line. Two 32-bit lanes of
++   different mixes, so a change anywhere in a list changes both: FNV-1a's
++   multiply, and a rotate-add of the word times the golden ratio. */
++inline uint64_t lm_sum(const uint32_t *src, int n) {
++    uint32_t a = 2166136261u, b = 0x9E3779B9u ^ (uint32_t)n;
++    for (int i = 0; i < n; ++i) {
++        const uint32_t w = src[i];
++        a = (a ^ w) * 16777619u;
++        b = ((b << 5) | (b >> 27)) + w * 0x9E3779B1u;
++    }
++    return (uint64_t)a << 32 | (b ^ (a >> 15));
++}
++
+ inline void lm_put_words(std::vector<uint32_t> &k, const void *p, size_t bytes) {
+     const uint32_t *w = static_cast<const uint32_t *>(p);
+     k.insert(k.end(), w, w + bytes / 4);
+@@ -3566,7 +3582,7 @@ struct LmOpen {
+ };
+ LmOpen g_lm_open;
+ 
+-void lm_cap_begin(LmEntry &e, const uint32_t *src, int n) {
++void lm_cap_begin(LmEntry &e, const uint32_t *src, int n, uint64_t sum) {
+     const Rec &R = g_rec;
+     LmOpen &o = g_lm_open;
+     o.e = &e;
+@@ -3589,7 +3605,7 @@ void lm_cap_begin(LmEntry &e, const uint32_t *src, int n) {
+     g_lm.bad_cmd = -1;
+     g_lm.on = 1;
+     e.n = (uint32_t)n;
+-    e.words.assign(src, src + n);
++    e.sum = sum;
+     e.ok = 0;
+     ++e.tries;
+ }
+@@ -3702,22 +3718,53 @@ void lm_replay(const LmEntry &e) {
+             const uint16_t id =
+                 (uint16_t)((R.mtx.size() - 1) | (R.mtx.back().persp ? 0x8000u : 0u));
+             const size_t at = R.v.size();
+-            R.v.resize(at + (v1 - v0));
+-            RecVtx *out = R.v.data() + at;
+-            const uint32_t color = g.color;
+-            for (uint32_t x = v0; x < v1; ++x) {
+-                *out = e.v[x];
+-                out->id = id;
+-                if (e.relit) out->color = color;
+-                ++out;
++            // copied in (a resize first zeroed every one, then overwrote it)
++            R.v.insert(R.v.end(), e.v.begin() + v0, e.v.begin() + v1);
++            RecVtx *out = R.v.data() + at, *end = out + (v1 - v0);
++            if (e.relit) {
++                const uint32_t color = g.color;
++                for (; out != end; ++out) { out->id = id; out->color = color; }
++            } else {
++                for (; out != end; ++out) out->id = id;
+             }
+             if (g_rec_id_stats) {
+                 RecMtx &m = R.mtx.back();
+                 for (uint32_t x = v0; x < v1; ++x) rec_id_stat(m, e.v[x].x, e.v[x].y, e.v[x].z);
+             }
+         }
+-        for (uint32_t t = e.seg_t[k]; t < e.seg_t[k + 1]; t += 3)
+-            rec_lean_tri(vbase + e.tri[t], vbase + e.tri[t + 1], vbase + e.tri[t + 2]);
++        // the segment's triangles: the first by rec_lean_tri (a run may
++        // begin there: a state change before the list), the rest into that
++        // run at once -- rec_lean_tri's own steps, a call and three
++        // push_backs a triangle less
++        const uint32_t t0 = e.seg_t[k], t1 = e.seg_t[k + 1];
++        if (t0 < t1) {
++            rec_lean_tri(vbase + e.tri[t0], vbase + e.tri[t0 + 1], vbase + e.tri[t0 + 2]);
++            if (t0 + 3 < t1 && !R.runs.empty()) {
++                const uint32_t ntri = (t1 - t0) / 3 - 1;
++                g_s5_frame[S5_TRIS] += ntri;
++                RecRun &run = R.runs.back();
++                uint32_t lo = run.id_lo, hi = run.id_hi;
++                bool ortho = false;
++                const size_t at = R.idx.size();
++                R.idx.resize(at + (size_t)ntri * 3);
++                uint16_t *out = R.idx.data() + at;
++                for (uint32_t t = t0 + 3; t < t1; t += 3) {
++                    uint32_t last = 0;
++                    for (int c = 0; c < 3; ++c) {
++                        const uint32_t x = vbase + e.tri[t + c];
++                        const uint32_t d = rec_id(R.v[x]);
++                        if (d < lo) lo = d;
++                        if (d > hi) hi = d;
++                        if (x > last) last = x;
++                        *out++ = (uint16_t)x;
++                    }
++                    if (!(R.v[last].id & 0x8000u)) ortho = true;
++                }
++                run.id_lo = (uint16_t)lo;
++                run.id_hi = (uint16_t)hi;
++                if (ortho) g_frame_ortho = true;
++            }
++        }
+     }
+     if (!e.v.empty()) R.strip_base = vbase + e.strip_base;
+     if (e.writes & (LM_W_PRIM | LM_W_VXYZ)) {
+@@ -3883,7 +3930,8 @@ int lm_start(const uint32_t *src, int n) {
+     ++g_lm_lists;
+     if (g_lm_map.size() > 4096) g_lm_map.clear();
+     LmEntry &e = g_lm_map[src];
+-    const bool same = e.n == (uint32_t)n && !std::memcmp(e.words.data(), src, (size_t)n * 4);
++    const uint64_t sum = lm_sum(src, n);
++    const bool same = e.n == (uint32_t)n && e.sum == sum;
+     if (same && e.ok) {
+         static std::vector<uint32_t> key;
+         lm_key(e.reads, e.slots, key);
+@@ -3904,7 +3952,7 @@ int lm_start(const uint32_t *src, int n) {
+     if (same && !e.ok && e.tries >= 2) { ++g_lm_why[LMW_SKIP]; return 0; }   // not a list it replays
+     ++g_lm_why[LMW_KEEP];
+     if (!same) e.tries = 0;
+-    lm_cap_begin(e, src, n);
++    lm_cap_begin(e, src, n, sum);
+     return 0;
+ }
+ 
+-- 
+2.55.0.windows.5
+

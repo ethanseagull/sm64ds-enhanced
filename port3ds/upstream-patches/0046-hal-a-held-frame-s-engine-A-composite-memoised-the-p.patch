@@ -1,0 +1,445 @@
+From 6d4de5859bcaa6a5f3b5537f9043c92b9c2b2571 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 10:33:48 -0700
+Subject: [PATCH] hal: a held frame's engine-A composite memoised (the pause
+ menu composed once)
+
+A pause screen puts a layer behind the 3D over all 49152 cells, so every
+pass of the composite runs over the whole screen: 33-35 ms of a 3DS tick,
+while the menu waits for input and the picture holds still. With
+port_message_composite_memo(1), a frame held on the card whose inputs are
+byte for byte the last recorded frame's replays that frame's result: the
+spans its blit wrote, the brightness mask, and the facts later code reads
+(the mask's flags, kept/buried, a cell behind the 3D, the signature).
+
+The inputs are compared, not hashed: the host answers the raster asks for
+(each sprite's routed shift and seam-snow answer, the gapless shift, the
+arrows' reanchor, the HUD layout, the picture's size, the per-line windows)
+and the memory it reads (DISPCNT and the BG, window and blend registers,
+the 3D clear colour, both palettes, OAM, each enabled BG's map and tiles,
+the OBJ tiles each shown sprite can reach). A frame is recorded only when
+plain (held, spans only, no arrow capture, no lift, no 2D on the card, no
+probe armed, the HUD row's star-counter edge at rest), and the memo is
+tried only after a frame that blitted 8192 cells or more
+(SM64DS_COMPA_MEMO_CELLS). SM64DS_COMPA_MEMO_VERIFY=1 composes every frame
+and counts results that differ from the replay's; the [compa] line carries
+the counts and a memo zone.
+---
+ port/hal/message_compositor.cpp | 302 +++++++++++++++++++++++++++++++-
+ 1 file changed, 298 insertions(+), 4 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index a9b589b1a..bce317da0 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -106,6 +106,7 @@
+ //     and what each of the two OBJ tests decided about it. That is the probe
+ //     port/ppu_blend.txt section 4 took by hand-patching raster_obj for mg8;
+ //     keeping it means the next lane's per-pixel transcript needs no patch.
++#include <algorithm>
+ #include <cstdint>
+ #include <cstdio>
+ #include <cstdlib>
+@@ -117,6 +118,7 @@
+ #include "hal/gpu_raster.h"
+ #include "menu_compose.h"   /* run menu1 lane HOOK1: the lift plan (H1) */
+ #include <chrono>
++#include <vector>
+ /* SAVEOVL1: may the menu layer be used at all (SM64DS_MENU_LAYER, default on)? The card's own readiness is asked per tick. */
+ static inline bool port_gpu_layer_ready_env()
+ {
+@@ -132,6 +134,8 @@ struct CaZones {
+     double acc[2][10] = {};
+     unsigned long long n[2] = {};
+     unsigned long long cells = 0, fast = 0, spans = 0;   /* the blit's cells, of them by the fast path, spans written */
++    unsigned long long memo_hits = 0, memo_recs = 0, memo_bad = 0;   /* g_memo: frames replayed, recorded, verify misses */
++    unsigned long long memo_match = 0;   /* SM64DS_COMPA_MEMO_VERIFY: frames that matched (composed and compared) */
+     std::chrono::steady_clock::time_point t;
+     int live = 0;
+     static void report();
+@@ -152,14 +156,14 @@ struct CaZones {
+ };
+ CaZones g_cz;
+ void CaZones::report() {
+-    static const char *nm[10] = {"h1_decide", "settle", "regs_to_default", "bg_loop_obj", "to_blit", "blit", "tail", "hud_row", "hud_labels", ""};
++    static const char *nm[10] = {"h1_decide", "settle", "regs_to_default", "bg_loop_obj", "to_blit", "blit", "tail", "hud_row", "hud_labels", "memo"};
+     for (int l = 0; l < 2; ++l) {
+         if (!g_cz.n[l]) continue;
+         std::fprintf(stderr, "[compa] lift=%d frames %llu mean ms:", l, g_cz.n[l]);
+-        for (int z = 0; z < 9; ++z) std::fprintf(stderr, " %s %.3f", nm[z], g_cz.acc[l][z] / (double)g_cz.n[l]);
+-        std::fprintf(stderr, "; blit cells %llu (fast %llu), spans %llu a frame\n",
++        for (int z = 0; z < 10; ++z) std::fprintf(stderr, " %s %.3f", nm[z], g_cz.acc[l][z] / (double)g_cz.n[l]);
++        std::fprintf(stderr, "; blit cells %llu (fast %llu), spans %llu a frame; memo: %llu replayed, %llu recorded, %llu matched under verify, %llu verify misses\n",
+                      g_cz.cells / (g_cz.n[0] + g_cz.n[1]), g_cz.fast / (g_cz.n[0] + g_cz.n[1]),
+-                     g_cz.spans / (g_cz.n[0] + g_cz.n[1]));
++                     g_cz.spans / (g_cz.n[0] + g_cz.n[1]), g_cz.memo_hits, g_cz.memo_recs, g_cz.memo_match, g_cz.memo_bad);
+     }
+ }
+ }
+@@ -174,6 +178,7 @@ extern "C" void port_compa_zones_report(void)
+         for (double &a : g_cz.acc[l]) a = 0;
+     }
+     g_cz.cells = g_cz.fast = g_cz.spans = 0;
++    g_cz.memo_hits = g_cz.memo_recs = g_cz.memo_match = g_cz.memo_bad = 0;
+ }
+ 
+ /* THE TOP ENGINE'S OBJ DISPLAY SHIFT, in DS rows, from hal/screen_gap.cpp.
+@@ -1294,6 +1299,7 @@ static uint8_t g_hud_row[192][256];   /* 1 = a moved coin counter pixel (read on
+ static Cell g_hud_cells[192][256];    /* the moved coin counter's cells, a plane of their own so they never replace a cell of g_a (the POWER label) */
+ static bool g_hud_row_live;
+ static bool g_hud_erase;   /* PROOF ARM (env SM64DS_HUD_ERASE_PROOF, off by default): the pre-fix behaviour, kept only to photograph the cause */
++static bool g_hud_fixed;   /* the frame left the row's star-counter state as it found it (g_memo may replay it) */
+ 
+ namespace hudelem {
+ 
+@@ -3322,6 +3328,250 @@ extern "C" int port_graph_block_beat(void);
+    whole derivation are in hal/sub_screen.cpp, which owns OAM::Load's wiring. */
+ extern "C" void port_frame_oam_upload(void);
+ 
++namespace {
++/* ---- THE PAUSE MENU COMPOSED ONCE (3DS lane, port_message_composite_memo) ----
++ *
++ * A pause screen puts a layer behind the 3D over all 49152 cells, and every
++ * pass of this composite (the BG and OBJ raster, the HUD element marks, the
++ * blit) then runs over the whole screen: 33-35 ms of a tick on the 3DS's
++ * game thread, where the HUD over a course is 1-2. And the picture holds still
++ * while the menu waits for input. So a frame held on the card whose inputs are
++ * byte for byte the last recorded frame's takes that frame's result instead of
++ * composing it: the spans its blit wrote (the framebuffer is the transparent
++ * fill plus those), the brightness mask, and the few facts later code reads.
++ *
++ * NOT DIRTY BITS AND NOT A HASH, as ntr/ppu_sub.cpp's scan cache: the inputs
++ * are compared against saved copies. They are the scalars the raster asks the
++ * host for (each sprite's routed shift and seam-snow answer, the gapless
++ * shift, the arrows' reanchor, the HUD layout, the picture's size, the
++ * per-line windows) and the memory it reads: DISPCNT and the BG, window and
++ * blend registers, the 3D clear colour (the mask's opaque-clear test), both
++ * palettes, OAM, each enabled BG's map and tile data, and the OBJ tiles each
++ * shown sprite can reach. What the composite keeps from frame to frame (g_a,
++ * the element labels, the moved coin row) is left as the recorded frame left
++ * it, which is what composing the same inputs again would leave, with one
++ * exception the recording checks: the HUD row's star-counter edge, which
++ * counts frames (g_hud_fixed).
++ *
++ * Recorded only when the frame is plain: held on the card, every write to the
++ * picture a span (g_pic_sig_ok), no arrow capture, no level-clear lift, no 2D
++ * on the card, no probe or proof arm armed. Tried only after a frame that
++ * blitted at least kMemoCells cells (a menu, not the HUD: the compare would
++ * cost a course frame more than its composite). SM64DS_COMPA_MEMO_VERIFY=1
++ * composes every frame anyway and counts the ones whose result differs from
++ * the replay's (the [compa] line). */
++struct MemoSpan { uint32_t lo, hi; };
++struct MemoBlit { int hx0, hx1, hy0, hy1; uint32_t word; };
++constexpr unsigned kMemoCells = 8192;
++/* SM64DS_COMPA_MEMO_CELLS=n moves the threshold (0: every held frame, for a
++   verify run that exercises the key on the HUD too) */
++unsigned memo_cells()
++{
++    static long v = -1;
++    if (v < 0) {
++        const char *e = std::getenv("SM64DS_COMPA_MEMO_CELLS");
++        v = e ? std::strtol(e, nullptr, 10) : (long)kMemoCells;
++        if (v < 0) v = kMemoCells;
++    }
++    return (unsigned)v;
++}
++struct Memo {
++    bool on;                       // the host asked (port_message_composite_memo)
++    bool valid;                    // the saved frame may be replayed
++    std::vector<uint32_t> scal;    // its scalars
++    std::vector<MemoSpan> spans;   // its memory spans, sorted and merged
++    std::vector<uint8_t> bytes;    // their contents, span after span
++    std::vector<MemoBlit> blits;   // its blit, in order
++    std::vector<uint8_t> bm;       // g_bm's rows as it left them (bm_live)
++    uint64_t sig;
++    bool bm_live, bm_card, bm_shown3d, bm_clear_opaque, behind;
++    uint32_t kept3d, buried3d;
++    unsigned cells;                // its blit cells
++    // the frame being composited
++    bool rec;                      // it may be recorded
++    bool would;                    // verify: it matched the saved inputs
++    bool behind_now;
++    unsigned cells_now, last_cells;
++    std::vector<uint32_t> cur_scal;
++    std::vector<MemoSpan> cur_spans;
++    std::vector<MemoBlit> cur_blits;
++};
++Memo g_memo;
++
++int memo_verify_on()
++{
++    static int v = -1;
++    if (v < 0) {
++        const char *e = std::getenv("SM64DS_COMPA_MEMO_VERIFY");
++        v = (e && *e && *e != '0') ? 1 : 0;
++    }
++    return v;
++}
++
++/* a probe or proof arm that prints or changes the picture per frame */
++bool memo_probes_off()
++{
++    static int v = -1;
++    if (v < 0) {
++        static const char *const kEnv[] = {
++            "SM64DS_MSG_COMPOSITE_DEBUG", "SM64DS_OBJBG_PROBE", "SM64DS_OBJSHIFT_TRACE",
++            "SM64DS_STAR_AFF", "SM64DS_OAMAGE_TRACE", "SM64DS_TWOD_VERIFY", "SM64DS_TWOD_OLD",
++            "SM64DS_HUD_DBG", "SM64DS_HUD_BLINK_SIM", "SM64DS_HUD_ERASE_PROOF",
++            "SM64DS_CARD_SETTLE_DRILL", "SM64DS_ENGA_LAYERS"};
++        v = 1;
++        for (const char *e : kEnv)
++            if (std::getenv(e)) v = 0;
++    }
++    return v != 0;
++}
++
++void memo_inputs(uint32_t dispcnt, std::vector<uint32_t> &scal, std::vector<MemoSpan> &sp)
++{
++    scal.clear();
++    sp.clear();
++    scal.push_back(dispcnt);
++    scal.push_back((uint32_t)ntr::active_w);
++    scal.push_back((uint32_t)ntr::active_h);
++    scal.push_back((uint32_t)ntr::present_native());
++    scal.push_back((uint32_t)host_setting_hud_layout());
++    scal.push_back((uint32_t)hal_gapless_obj_raster_shift_ds());
++    scal.push_back((uint32_t)hal_minimap_arrow_reanchor_on());
++    for (int i = 0; i < 128; ++i) {
++        scal.push_back((uint32_t)ntr::ppu_obj_routed_live_resid(i));
++        scal.push_back(ntr::ppu_seam_snow_owns(rd16(oam_a() + i * 8u + 4)) ? 1u : 0u);
++    }
++    const uint32_t *rows = nullptr;
++    if (ntr::rt_window_rows(0, &rows) && rows) {
++        scal.push_back(1u);
++        scal.insert(scal.end(), rows, rows + 192);
++    } else {
++        scal.push_back(0u);
++    }
++    sp.push_back({kRegBase, kRegBase + 0x04});          // DISPCNT
++    sp.push_back({kRegBase + 0x08, kRegBase + 0x58});   // BG, windows, blend
++    sp.push_back({0x04000350u, 0x04000354u});           // the 3D clear colour
++    sp.push_back({kPlttBase, kPlttBase + 0x400});       // both palettes
++    sp.push_back({oam_a(), oam_a() + 0x400});           // OAM
++    for (int bg = 0; bg < 4; ++bg) {
++        const BgConfig c = read_bg(bg, dispcnt);
++        if (!c.enabled) continue;
++        sp.push_back({c.screen, c.screen + (uint32_t)((c.tiles_w >> 5) * (c.tiles_h >> 5)) * 0x800u});
++        sp.push_back({c.chars, c.chars + (c.bpp8 ? 0x10000u : 0x8000u)});
++    }
++    static const int kSizes[3][4][2] = {
++        {{8, 8}, {16, 16}, {32, 32}, {64, 64}},
++        {{16, 8}, {32, 8}, {32, 16}, {64, 32}},
++        {{8, 16}, {8, 32}, {16, 32}, {32, 64}},
++    };
++    const uint32_t boundary = 32u << ((dispcnt >> 20) & 3);
++    const bool map1d = (dispcnt >> 4) & 1;
++    for (int i = 0; i < 128; ++i) {
++        const uint16_t a0 = rd16(oam_a() + i * 8u);
++        const uint16_t a1 = rd16(oam_a() + i * 8u + 2);
++        const uint16_t a2 = rd16(oam_a() + i * 8u + 4);
++        if (!(a0 & 0x100) && (a0 & 0x200)) continue;   // hidden
++        const int shape = (a0 >> 14) & 3;
++        if (shape == 3) continue;
++        const int size = (a1 >> 14) & 3;
++        const int tw = kSizes[shape][size][0] / 8, th = kSizes[shape][size][1] / 8;
++        const uint32_t per = (a0 & 0x2000) ? 2u : 1u;   // 32-byte slots a cell
++        const uint32_t slots = map1d ? (uint32_t)(th * tw) * per : (uint32_t)(th - 1) * 32u + (uint32_t)tw * per;
++        const uint32_t lo = kObjVram + (uint32_t)(a2 & 0x3FF) * boundary;
++        sp.push_back({lo, lo + slots * 32u});
++    }
++    std::sort(sp.begin(), sp.end(), [](const MemoSpan &a, const MemoSpan &b) { return a.lo < b.lo; });
++    size_t n = 0;
++    for (size_t i = 0; i < sp.size(); ++i) {
++        if (n && sp[i].lo <= sp[n - 1].hi) {
++            if (sp[i].hi > sp[n - 1].hi) sp[n - 1].hi = sp[i].hi;
++        } else {
++            sp[n++] = sp[i];
++        }
++    }
++    sp.resize(n);
++}
++
++bool memo_same()
++{
++    if (g_memo.cur_scal != g_memo.scal || g_memo.cur_spans.size() != g_memo.spans.size()) return false;
++    size_t off = 0;
++    for (size_t i = 0; i < g_memo.spans.size(); ++i) {
++        const MemoSpan &a = g_memo.cur_spans[i], &b = g_memo.spans[i];
++        if (a.lo != b.lo || a.hi != b.hi) return false;
++        const size_t len = a.hi - a.lo;
++        if (std::memcmp(reinterpret_cast<const void *>(a.lo), g_memo.bytes.data() + off, len) != 0)
++            return false;
++        off += len;
++    }
++    return true;
++}
++
++void memo_replay(ntr::Framebuffer &fb)
++{
++    for (const MemoBlit &b : g_memo.blits)
++        blit_ov_cell(fb, b.hx0, b.hx1 - b.hx0, b.hy0, b.hy1, b.word, false, 0);
++    g_bm_live = g_memo.bm_live;
++    g_bm_card = g_memo.bm_card;
++    g_bm_shown3d = g_memo.bm_shown3d;
++    g_bm_clear_opaque = g_memo.bm_clear_opaque;
++    if (g_memo.bm_live && g_bm) std::memcpy(g_bm, g_memo.bm.data(), g_memo.bm.size());
++    if (g_memo.behind) ntr::gx_card_note_behind();
++    g_kept3d = g_memo.kept3d;
++    g_buried3d = g_memo.buried3d;
++    g_pic_sig = g_memo.sig;
++    g_pic_sig_ok = true;
++    g_memo.last_cells = g_memo.cells;
++}
++
++/* the end of a composite that may be recorded: check it against the saved
++   frame when verifying, then save it if it is plain */
++void memo_finish()
++{
++    if (!g_memo.rec) return;
++    g_memo.rec = false;
++    const size_t bm_len = (size_t)ntr::SCREEN_W * (size_t)ntr::active_h;
++    if (g_memo.would) {
++        const bool same = g_pic_sig_ok && g_pic_sig == g_memo.sig && g_bm_live == g_memo.bm_live &&
++                          g_bm_card == g_memo.bm_card && g_bm_shown3d == g_memo.bm_shown3d &&
++                          g_bm_clear_opaque == g_memo.bm_clear_opaque &&
++                          g_memo.behind_now == g_memo.behind && g_kept3d == g_memo.kept3d &&
++                          g_buried3d == g_memo.buried3d &&
++                          (!g_bm_live || (g_bm && g_memo.bm.size() == bm_len &&
++                                          std::memcmp(g_bm, g_memo.bm.data(), bm_len) == 0));
++        if (!same) ++g_cz.memo_bad;
++    }
++    if (!g_pic_sig_ok || !ntr::gx_card_overlay_active() || g_arrow_n || !g_hud_fixed ||
++        ntr::gx_aa_preimage() || (g_bm_live && !g_bm)) {
++        g_memo.valid = false;
++        return;
++    }
++    g_memo.scal.swap(g_memo.cur_scal);
++    g_memo.spans.swap(g_memo.cur_spans);
++    g_memo.blits.swap(g_memo.cur_blits);
++    size_t total = 0;
++    for (const MemoSpan &s : g_memo.spans) total += s.hi - s.lo;
++    g_memo.bytes.resize(total);
++    size_t off = 0;
++    for (const MemoSpan &s : g_memo.spans) {
++        std::memcpy(g_memo.bytes.data() + off, reinterpret_cast<const void *>(s.lo), s.hi - s.lo);
++        off += s.hi - s.lo;
++    }
++    g_memo.sig = g_pic_sig;
++    g_memo.bm_live = g_bm_live;
++    g_memo.bm_card = g_bm_card;
++    g_memo.bm_shown3d = g_bm_shown3d;
++    g_memo.bm_clear_opaque = g_bm_clear_opaque;
++    if (g_bm_live) g_memo.bm.assign(g_bm, g_bm + bm_len);
++    g_memo.behind = g_memo.behind_now;
++    g_memo.kept3d = g_kept3d;
++    g_memo.buried3d = g_buried3d;
++    g_memo.cells = g_memo.cells_now;
++    g_memo.valid = true;
++    ++g_cz.memo_recs;
++}
++
++}  // namespace
++
+ // Rasterise engine A's 2D layers into the DS 256x192 hit buffer, then composite
+ // the covered pixels over the host 3D framebuffer (scaled by integer factor).
+ // Called from walk_window right after gx_render and before the fade composite.
+@@ -3473,6 +3723,33 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     }
+     const bool forced_blank = (dispcnt >> 7) & 1;
+ 
++    /* THE PAUSE MENU COMPOSED ONCE (g_memo): the same inputs as the recorded
++       frame take its result. Asked here, after every publish above (the
++       registers and OAM are this frame's) and before anything is drawn. */
++    {
++        const unsigned last = g_memo.last_cells;
++        g_memo.last_cells = 0;
++        g_memo.rec = g_memo.would = g_memo.behind_now = false;
++        g_memo.cells_now = 0;
++        g_memo.cur_blits.clear();
++        if (g_memo.on && last >= memo_cells() && !forced_blank && !tw_try && !lc_ov.live &&
++            !lc_ov.top_live && ntr::gx_card_overlay_active() && memo_probes_off()) {
++            memo_inputs(dispcnt, g_memo.cur_scal, g_memo.cur_spans);
++            if (g_memo.valid && memo_same()) {
++                if (!memo_verify_on()) {
++                    memo_replay(fb);
++                    ++g_cz.memo_hits;
++                    g_cz.mark(9);   /* the inputs' compare and the replay */
++                    return;
++                }
++                g_memo.would = true;
++                ++g_cz.memo_match;
++            }
++            g_memo.rec = true;
++            g_memo.valid = false;   /* until this frame is saved (memo_finish) */
++        }
++    }
++
+     /* raw engine-A register dump before any early-return, so a headless run
+        sees the real DISPCNT/BGxCNT whatever produced them even if no BG reads
+        as enabled.
+@@ -3945,6 +4222,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+        it. */
+     /* THE N64 ROW, once per frame: only in a 3D scene shown at its own layout, never under a level-clear lift. */
+     g_hud_row_live = false;
++    g_hud_fixed = true;
+ #ifndef PORT_ROM_CLEAN      /* env-only proof arm: not in the shipped build (g_hud_erase stays false) */
+     { static const bool e = std::getenv("SM64DS_HUD_ERASE_PROOF") != nullptr; g_hud_erase = e; }
+ #endif
+@@ -3984,6 +4262,9 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+             else if (++s_star_larger >= 120) { s_star_left = star_left; s_star_larger = 0; s_star_right = -1; }
+         }
+         star_left = s_star_left;
++        /* a larger left edge counts toward its 120 frames: the same frame again
++           would not leave this state as it is (and the blink sim never does) */
++        if ((star_raw < 256 && star_raw > s_star_left) || blink_sim) g_hud_fixed = false;
+         /* THE POWER METER's rightmost OBJ pixel in the rows the coin block lands on (x 80..187), and the coin block's own
+            left edge before the move. The block keeps kHudMeterGap clear pixels from the meter when the star counter allows. */
+         int meter_right = -1, blk_left = 256;
+@@ -4160,6 +4441,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+         pic_sig_add((uint32_t)sp.hx0 | (uint32_t)sp.hx1 << 16);
+         pic_sig_add((uint32_t)sp.hy0 | (uint32_t)sp.hy1 << 16);
+         pic_sig_add(sp.word);
++        if (g_memo.rec) g_memo.cur_blits.push_back(MemoBlit{sp.hx0, sp.hx1, sp.hy0, sp.hy1, sp.word});
+         blit_ov_cell(fb, sp.hx0, sp.hx1 - sp.hx0, sp.hy0, sp.hy1, sp.word, bm_on, sp.bits);
+         sp.live = false;
+     };
+@@ -4208,6 +4490,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+             if (pass && !g_hud_row[y][x]) continue;   /* g_hud_cells is not cleared per frame: only this frame's moved cells */
+             if (!pass && g_hud_erase && g_hud_row_live && g_hud_row[y][x]) continue;
+             if (g_cz.on > 0) ++g_cz.cells;
++            ++g_memo.cells_now;
+             if (f_ok && x == f_x + 1 && gc.color == f_c.color && gc.owner == f_c.owner &&
+                 gc.prio == f_c.prio && gc.msgcur == f_c.msgcur &&
+                 (!ntr::widescreen || hudelem::g_lbl[y][x] == hudelem::g_lbl[y][x - 1]) &&
+@@ -4426,6 +4709,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+             /* BEHIND the 3D layer: it may only fill where 3D drew nothing */
+             if (ovl3d) {
+                 ntr::gx_card_note_behind();
++                g_memo.behind_now = true;
+                 const uint32_t word = (c & 0x00FFFFFFu) | (GX_OV_BEHIND << 24);
+                 const unsigned char bits = (unsigned char)((bmv ? 4u : 0u) | 16u);
+                 span_cell(hx0, bw, hy0, hy1, word, bits);
+@@ -4472,6 +4756,8 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     }
+     g_kept3d = kept;
+     g_buried3d = buried;
++    g_memo.last_cells = g_memo.cells_now;
++    memo_finish();
+     g_cz.mark(6);
+ }
+ 
+@@ -4531,3 +4817,11 @@ extern "C" int port_message_composite_signature(unsigned long long *sig)
+     if (ok && sig) *sig = g_pic_sig;
+     return ok;
+ }
++
++/* THE PAUSE MENU COMPOSED ONCE (g_memo): a host that wants it says so once.
++   Off, nothing of it runs but a counter. */
++extern "C" void port_message_composite_memo(int on)
++{
++    g_memo.on = on != 0;
++    if (!g_memo.on) g_memo.valid = false;
++}
+-- 
+2.55.0.windows.5
+

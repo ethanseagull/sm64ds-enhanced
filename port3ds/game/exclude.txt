@@ -1,0 +1,28 @@
+# Sources of the PC game build the 3DS game build does not compile.
+# One fnmatch glob per line, relative to PORT_ROOT or PC_PROBE.
+
+# The PC host program (window, pacing, presenter, menus over SDL/Win32);
+# the 3DS host is port3ds/game/main_game.cpp.
+port/tests/walk_window.cpp
+
+# The Direct3D 11 card and its present path: port3ds/src/card3ds.cpp
+# implements hal/gpu_raster.h instead.
+port/hal/gpu_raster.cpp
+port/hal/gpu_present.cpp
+
+# MSVC __thiscall bridges ("faces"): GCC on ARM calls the game's methods
+# with the ROM's own convention, so none are needed (port3ds/tools/linkfix.py).
+host-src/faces_sync_gen.cpp
+# Windows-only HAL modules, replaced by 3DS ones (the link stage supplies
+# their entry points): the WASAPI audio output (-> NDSP) and the native-DLL
+# code-mod loader (no code mods on the 3DS).
+port/hal/sdat/out_win.cpp
+port/hal/mod_plugins.cpp
+# PC diagnostics and input over DXGI / DirectInput / XInput: the per-session
+# hardware perf report and the gamepad backend. The 3DS supplies the
+# port_perf_log_* and port_pad_* entry points (pad: hid, Circle Pad).
+port/hal/perf_log.cpp
+port/hal/pad_backend.cpp
+# ROM-CLEAN's install refusals as Win32 message boxes (CreateFileA, MessageBoxA):
+# port_asset_root_refuse / port_asset_mismatch_refuse are in game/host_stubs.cpp.
+port/hal/asset_root_refuse.cpp

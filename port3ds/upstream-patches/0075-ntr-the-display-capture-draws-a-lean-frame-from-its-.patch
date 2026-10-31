@@ -1,0 +1,188 @@
+From a84b233a8d8a8c24c852fa7b692aa4316d7ea4fa Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 12:22:20 -0700
+Subject: [PATCH] ntr: the display capture draws a lean frame from its record
+
+The card can take the capture from a copy of the frame's record (gx_copy_record, GxGpuFrame::from_record) instead of the triangles made on the CPU, and the capture's hash is off on the 3DS unless asked for.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/gpu_raster.cpp   |  1 +
+ port/ntr/gx.cpp           | 51 +++++++++++++++++++++++++++++++--------
+ port/ntr/include/ntr/gx.h |  9 +++++++
+ port/ntr/ppu.cpp          | 35 +++++++++++++++++++++++++--
+ 4 files changed, 84 insertions(+), 12 deletions(-)
+
+diff --git a/port/hal/gpu_raster.cpp b/port/hal/gpu_raster.cpp
+index 46ab57caf..b565639ec 100644
+--- a/port/hal/gpu_raster.cpp
++++ b/port/hal/gpu_raster.cpp
+@@ -3387,6 +3387,7 @@ int card_ret_readback(const ntr::GxGpuFrame *f)
+ int card_settle(const ntr::GxGpuFrame *f)
+ {
+     if (f->settle == 3) return card_ret_readback(f);
++    if (f->from_record) return 0;   /* draws triangles only: ask again with them */
+     if (!g_cp_held || !f->fb) return 0;
+     /* TWODGPU1: this tick's 2D is in the overlay target, not in the framebuffer */
+     if (g_tw_live && (const uint32_t *)f->fb == g_tw_fb)
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index fbb9bdd01..19988d936 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -4813,6 +4813,39 @@ void gx_record_finish(GxRecord &into) {
+     into.pend_slot = -1;
+ }
+ 
++/* The recorder's runs as GxRecRuns, each with its count, for a record of
++   `ntri` triangles. */
++static void rec_runs_into(GxRecord &into, uint32_t ntri) {
++    const Rec &R = g_rec;
++    into.runs.resize(R.runs.size());
++    for (size_t r = 0; r < R.runs.size(); ++r) {
++        GxRecRun &o = into.runs[r];
++        o.st = R.runs[r].st;
++        o.first = R.runs[r].first;
++        o.id_lo = R.runs[r].id_lo;
++        o.id_hi = R.runs[r].id_hi;
++        o.count = (r + 1 < R.runs.size() ? R.runs[r + 1].first : ntri) - o.first;
++    }
++}
++
++int gx_copy_record(GxRecord &into) {
++    const Rec &R = g_rec;
++    into.runs.clear();
++    into.mtx.clear();
++    into.raw.clear();
++    into.pend_slot = -1;
++    if (!R.on) {
++        into.v.clear();
++        into.idx.clear();
++        return 0;
++    }
++    into.v.assign(R.v.begin(), R.v.end());
++    into.idx.assign(R.idx.begin(), R.idx.end());
++    rec_runs_into(into, (uint32_t)(into.idx.size() / 3));
++    rec_make_mtx(into, R.mtx.data(), R.mtx.size(), pws_frame_now());
++    return 1;
++}
++
+ int gx_take_record(GxRecord &into, bool defer) {
+     Rec &R = g_rec;
+     into.runs.clear();
+@@ -4828,16 +4861,7 @@ int gx_take_record(GxRecord &into, bool defer) {
+     into.idx.swap(R.idx);
+     R.v.clear();
+     R.idx.clear();
+-    const uint32_t ntri = (uint32_t)(into.idx.size() / 3);
+-    into.runs.resize(R.runs.size());
+-    for (size_t r = 0; r < R.runs.size(); ++r) {
+-        GxRecRun &o = into.runs[r];
+-        o.st = R.runs[r].st;
+-        o.first = R.runs[r].first;
+-        o.id_lo = R.runs[r].id_lo;
+-        o.id_hi = R.runs[r].id_hi;
+-        o.count = (r + 1 < R.runs.size() ? R.runs[r + 1].first : ntri) - o.first;
+-    }
++    rec_runs_into(into, (uint32_t)(into.idx.size() / 3));
+     const PwsFrame f = pws_frame_now();
+     int slot = -1;
+     if (defer && !into.want_raw)
+@@ -6199,6 +6223,13 @@ const uint32_t *gx_card_capture_picture()
+     f.ph = g_cp_geo.ph;
+     f.aa_mode = g_aa_mode;
+     f.out = &out;
++    /* a lean frame's triangles are not made yet: the card may draw the
++       record instead (GxGpuFrame::from_record) */
++    if (g_rec.lean && g_rec.on && !g_rec.listed) {
++        f.from_record = 1;
++        if (g_gpu_opaque(&f) == 1) return g_cp_scratch;
++        f.from_record = 0;
++    }
+     rec_lean_list();   /* the held frame's triangles, as the settle's */
+     f.tris = g.tris.data();
+     f.count = g.tris.size();
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index 814d404f7..4149930e7 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -253,6 +253,9 @@ struct GxRecord {
+ // on any thread once this has returned (the products are ~1.4 ms of a 3DS
+ // title frame with the head up: the card's present makes them on core 2).
+ int gx_take_record(GxRecord &into, bool defer = false);
++// The same, but a copy, with its matrices made: the record stays for the take
++// (the display capture draws the frame before it is presented).
++int gx_copy_record(GxRecord &into);
+ // A deferred take's `mtx` (nothing when there is none pending)
+ void gx_record_finish(GxRecord &into);
+ // LEAN FRAMES (step 5.2b), for a card that draws every frame it keeps from
+@@ -526,8 +529,14 @@ struct GxGpuFrame {
+     //         (then the 3D of that one frame is the clear colour). tris /
+     //         count are the held frame's triangles again (a lean frame,
+     //         gx_record_configure, has none until a settle makes them).
++    // from_record  with settle 2, a lean frame: tris / count are NOT made yet
++    //         and the card may draw the picture from the frame's record
++    //         (gx_copy_record) instead, answering 1; any other answer and the
++    //         settle is asked again with the triangles. Making them was most
++    //         of a capture on the 3DS (the four dual-screen minigames).
+     int keep;
+     int settle;
++    int from_record;
+     // slot    with settle 3 (run hunt8, lane GPUINTERP1): 1 the retained tick's
+     //         composite, 2 the retained picture between two ticks
+     int slot;
+diff --git a/port/ntr/ppu.cpp b/port/ntr/ppu.cpp
+index e756096b4..c9cf8bf23 100644
+--- a/port/ntr/ppu.cpp
++++ b/port/ntr/ppu.cpp
+@@ -999,6 +999,35 @@ void ppu_display_capture(const uint32_t *src, int w, int h) {
+        at the end: a global read-modify-write per pixel would be the only thing
+        in this loop the compiler cannot keep in a register. */
+     unsigned long long h1 = g_cap_hash;
++    /* THE HASH ONLY WHEN ASKED (SM64DS_CAPTURE_HASH=1, or SM64DS_CAPTURE_HASH=0
++       to turn it off on a host that asks by default): two 64-bit multiplies a
++       pixel are a few ms of a dual-screen minigame's frame on the 3DS, for a
++       number only the [aa] diagnostics print. Off by default on the 3DS
++       (SM64DS_HOST_3DS); every other host keeps it on. */
++    static const bool hash_on = [] {
++        const char *e = std::getenv("SM64DS_CAPTURE_HASH");
++#if defined(SM64DS_HOST_3DS)
++        return e && *e && *e != '0';
++#else
++        return !(e && *e == '0');
++#endif
++    }();
++    if (!hash_on && rx == 1 && ry == 1 && cx0 + cw <= w && cy0 + ch <= h) {
++        /* one DS pixel a source pixel, inside the extent: straight rows */
++        for (int y = 0; y < ch; ++y) {
++            const uint32_t *row = src + (size_t)(cy0 + y) * (size_t)SCREEN_W + cx0;
++            uint16_t *out = dst + (size_t)y * cw;
++            for (int x = 0; x < cw; ++x) {
++                const uint32_t p = row[x];
++                out[x] = (uint16_t)(0x8000u | (((p >> 3) & 0x1Fu) << 10) |
++                                    (((p >> 11) & 0x1Fu) << 5) | ((p >> 19) & 0x1Fu));
++            }
++        }
++        ++g_cap_performed;
++        g_cap[block].off = off;
++        g_cap[block].len = need;
++        return;
++    }
+     for (int y = 0; y < ch; ++y) {
+         const int sy = cy0 + (ry > 0 ? y * ry : (y * ph) / SUB_H);
+         /* w/h are the LIVE image extent; the framebuffer's row stride is always
+@@ -1023,8 +1052,10 @@ void ppu_display_capture(const uint32_t *src, int w, int h) {
+                capture order. Two runs of the same rows agree on this number
+                only if every captured pixel of every captured frame agrees, so
+                it is the whole of "the game read back the same picture". */
+-            h1 = (h1 ^ (unsigned long long)(v & 0xFFu)) * 1099511628211ull;
+-            h1 = (h1 ^ (unsigned long long)((v >> 8) & 0xFFu)) * 1099511628211ull;
++            if (hash_on) {
++                h1 = (h1 ^ (unsigned long long)(v & 0xFFu)) * 1099511628211ull;
++                h1 = (h1 ^ (unsigned long long)((v >> 8) & 0xFFu)) * 1099511628211ull;
++            }
+         }
+     }
+     g_cap_hash = h1;
+-- 
+2.55.0.windows.5
+

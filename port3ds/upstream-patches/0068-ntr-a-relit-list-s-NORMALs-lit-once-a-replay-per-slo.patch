@@ -1,0 +1,155 @@
+From c338c3abd7cf3ebd03bb6ba30c4fac889496e2cb Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 18:21:45 -0700
+Subject: [PATCH] ntr: a relit list's NORMALs lit once a replay per slot and
+ word
+
+A skinned model's list sends a NORMAL before nearly every vertex, and a
+vertex a strip shares sends its word again under the same bone: Memory
+Match's Luigi, ~2,000 NORMALs a frame in 8 relit lists, repeats 63% of them
+within the list. A replay runs only MTX_RESTORE, COLOR and NORMAL, so the
+direction matrix is the stack slot the last MTX_RESTORE named and the
+lighting holds still: lm_lit keeps what normal_light leaves (the colour and
+the normal) per slot and word, a generation a replay. lm_replay runs its
+NORMALs and COLORs without exec's dispatch, copies a segment's vertices one
+by one into the room it reserved (a range insert cost more than the copy for
+one vertex a segment), and RecMtx is no longer zeroed before rec_new_id sets
+every field (persp a word, so no padding is left unset).
+
+The 3DS port, Azahar: Memory Match's render 8.9 -> 6.5 ms a frame, the same
+pictures (900 frames, byte-identical); SM64DS_LIST_MEMO_VERIFY-style mode 2
+in Memory Match and levels 1 and 6: 0 mismatches.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp | 90 ++++++++++++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 82 insertions(+), 8 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 4bc4114e4..fbb9bdd01 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -1806,7 +1806,11 @@ struct RecMtx {
+        one -- what interp3ds would otherwise walk the whole record for */
+     uint32_t vhash, nv, first;
+     float cs[3];
+-    uint8_t persp;         // proj is a perspective one (each vertex's id bit 15)
++    uint32_t persp;        // proj is a perspective one (each vertex's id bit 15)
++    /* made by rec_new_id, which sets every field: not zeroed first (a
++       skinned model makes ~500 a frame, 184 bytes each); a word for persp,
++       so no padding is left unset (mode 2 compares them as bytes) */
++    RecMtx() {}
+ };
+ struct RecRun {
+     uint32_t first;        // its first triangle
+@@ -3778,14 +3782,75 @@ void lm_replay_dry(const LmEntry &e) {
+     lm_replay_state(e);
+ }
+ 
++/* A RELIT LIST'S NORMALS, LIT ONCE A REPLAY PER STACK SLOT AND WORD. A
++   skinned model sends a NORMAL before nearly every vertex, and a vertex a
++   strip shares sends its word again under the same bone: Memory Match's
++   Luigi, 2,000 NORMALs a frame in 8 lists, repeats 63% of them within the
++   list (a matrix that moves every frame repeats none across frames). Inside
++   one replay the only commands that run are MTX_RESTORE, COLOR and NORMAL
++   (lm_note), so the direction matrix is the stack slot the last MTX_RESTORE
++   named (or the one the list came in with, slot 32), the stack and the
++   lighting hold still, and the same word under the same slot lights to the
++   same bits: what normal_light leaves (the colour, the normal) is kept and
++   put back. Not under normal-source texgen (a NORMAL moves the texcoord;
++   lm_cap_end does not make those lists relit, and a replay checks again).
++   A generation a replay, so the table is never cleared. */
++struct LmLit {
++    uint32_t gen, w, slot, color;
++    float nrm[3];
++};
++LmLit g_lm_lit[512];
++uint32_t g_lm_lit_gen;
++void lm_lit(uint32_t w, uint32_t slot) {
++    uint32_t h = ((w ^ (slot << 27)) * 2654435761u) >> 23;
++    for (int probe = 0; probe < 8; ++probe, h = (h + 1) & 511) {
++        LmLit &x = g_lm_lit[h];
++        if (x.gen != g_lm_lit_gen) {   // free: light it and keep it
++            normal_light(w, g.vec);
++            x.gen = g_lm_lit_gen;
++            x.w = w;
++            x.slot = slot;
++            x.color = g.color;
++            std::memcpy(x.nrm, g.nrm, sizeof x.nrm);
++            return;
++        }
++        if (x.w == w && x.slot == slot) {
++            g.color = x.color;
++            std::memcpy(g.nrm, x.nrm, sizeof g.nrm);
++            g.normal_live = 1;
++            return;
++        }
++    }
++    normal_light(w, g.vec);   // a full neighbourhood: lit, not kept
++}
++
+ // The kept list into the record (lm_capture's notes on what is live).
+ void lm_replay(const LmEntry &e) {
+     Rec &R = g_rec;
+     const uint32_t vbase = (uint32_t)R.v.size();
+     R.v.reserve(vbase + e.v.size());
++    // exec's NORMAL is normal_light and its counts here (lm_start refused a
++    // dry frame's NORMALs, SM64DS_MAT_LOG and the smoother)
++    const bool lit = e.relit && ((g_teximage >> 30) & 3) != 2;
++    if (lit && ++g_lm_lit_gen == 0) {
++        std::memset(g_lm_lit, 0, sizeof g_lm_lit);
++        g_lm_lit_gen = 1;
++    }
++    uint32_t slot = 32;
+     for (size_t k = 0; k + 1 < e.seg_v.size(); ++k) {
+         // MTX_RESTORE with this frame's matrices; COLOR or NORMAL with its lighting
+-        if (k) exec(e.live_cmd[k - 1], &e.live[k - 1], 1);
++        if (k) {
++            const uint8_t c = e.live_cmd[k - 1];
++            const uint32_t w = e.live[k - 1];
++            if (c == 0x21 && lit) {
++                ++g_cmd_n[0x21];
++                g_nrm_pend = g_nrm_kept = false;
++                lm_lit(w, slot);
++            } else {
++                if (c == 0x14) slot = w & 31;
++                exec(c, &e.live[k - 1], 1);
++            }
++        }
+         const uint32_t v0 = e.seg_v[k], v1 = e.seg_v[k + 1];
+         if (v0 != v1) {
+             // vertex(): the segment's first vertex's matrix id
+@@ -3796,15 +3861,24 @@ void lm_replay(const LmEntry &e) {
+             R.geom = 1;
+             const uint16_t id =
+                 (uint16_t)((R.mtx.size() - 1) | (R.mtx.back().persp ? 0x8000u : 0u));
+-            const size_t at = R.v.size();
+-            // copied in (a resize first zeroed every one, then overwrote it)
+-            R.v.insert(R.v.end(), e.v.begin() + v0, e.v.begin() + v1);
+-            RecVtx *out = R.v.data() + at, *end = out + (v1 - v0);
++            // copied in one by one into the room reserved above (a resize
++            // first zeroed every one; a range insert costs more than the
++            // copy for a skinned list's one vertex a segment)
++            const RecVtx *in = e.v.data() + v0, *end = e.v.data() + v1;
+             if (e.relit) {
+                 const uint32_t color = g.color;
+-                for (; out != end; ++out) { out->id = id; out->color = color; }
++                for (; in != end; ++in) {
++                    RecVtx t = *in;
++                    t.id = id;
++                    t.color = color;
++                    R.v.push_back(t);
++                }
+             } else {
+-                for (; out != end; ++out) out->id = id;
++                for (; in != end; ++in) {
++                    RecVtx t = *in;
++                    t.id = id;
++                    R.v.push_back(t);
++                }
+             }
+             if (g_rec_id_stats) {
+                 RecMtx &m = R.mtx.back();
+-- 
+2.55.0.windows.5
+

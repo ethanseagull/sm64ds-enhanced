@@ -1,0 +1,265 @@
+From 8adca6697b097065edaa3fc8981ec3af61e0a81a Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 13:11:15 -0700
+Subject: [PATCH] ntr: a record's matrices made later, where the card presents
+ it; the sub scan cache saved every fourth draw while it misses
+
+gx_take_record(into, defer): without want_raw, the ids' recorded
+matrices are swapped out of the recorder whole (a slot per GxRecord) and
+the frame's presentation captured (PwsFrame: menu_wide, the present and
+active sizes, the menu zoom and shift, hor_widen); gx_record_finish makes
+`mtx` from them with the same products, on any thread. The 3DS title's
+head and star (~490 ids a frame) spent ~1.4 ms of the game thread here;
+the card now does it in its present on core 2. Same floats (rec_pws reads
+the captured numbers, which are the ones it read before).
+
+ppu_sub.cpp scan_cached: once four draws come in a row, a draw saves its
+inputs and picture every fourth time only (the title's logo screen, its
+sparkles moving every frame, copied every input and the picture for a
+hand-back that never came: ~0.7 ms of a scan). A screen that holds still
+is handed back again within four scans; what is drawn is unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp           | 131 ++++++++++++++++++++++++++------------
+ port/ntr/include/ntr/gx.h |  12 +++-
+ port/ntr/ppu_sub.cpp      |   9 +++
+ 3 files changed, 112 insertions(+), 40 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 848ed6ebe..ce212458c 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -3902,21 +3902,34 @@ const GxTriangle *gx_take_triangles(std::vector<GxTriangle> &into) {
+    squeeze and zoom, under the id's own sprite bracket), and to_screen's
+    viewport map in homogeneous form (X w = x vp_w/2 + w (vp_w/2 + vp_x),
+    Y w = -y vp_h/2 + w (vp_h/2 + vp_y), Z w = z/2 + w/2). */
++/* What rec_pws reads of the frame's presentation, as it stood at the take
++   (gx_take_record), so a deferred record (gx_record_finish) is made from the
++   same numbers: menu_wide(), present_w / h and active_w / h as floats, the
++   menu zoom and shift, hor_widen(). */
++struct PwsFrame {
++    float mw, pw, ph, aw, ah, zoom, dy, widen;
++};
++static_assert(sizeof(PwsFrame) == sizeof(GxRecord::pend_frame), "pend_frame holds a PwsFrame");
++static PwsFrame pws_frame_now() {
++    const bool mw = menu_wide();
++    return {mw ? 1.0f : 0.0f, (float)present_w(), (float)present_h(), (float)active_w, (float)active_h,
++            g.mw_zoom, g.mw_dy, hor_widen()};
++}
+ // gx_take_record's proj x W x S for one id's inputs: W the widen (Hor+ for a
+ // perspective projection) or the menu-wide squeeze/zoom, S to_screen's
+ // viewport map in homogeneous form.
+-static Mat rec_pws(const RecMtx &m, bool mw, bool persp) {
++static Mat rec_pws(const RecMtx &m, const PwsFrame &f, bool persp) {
+     Mat W = Mat::identity();
+-    if (mw) {
+-        W.m[0] = (float)present_w() / (float)active_w;
+-        W.m[5] = (float)present_h() / (float)active_h;
+-        if (!m.sprite && (g.mw_zoom != 1.0f || g.mw_dy != 0.0f)) {
+-            W.m[0] *= g.mw_zoom;
+-            W.m[5] *= g.mw_zoom;
+-            W.m[13] = g.mw_dy;
++    if (f.mw != 0.0f) {
++        W.m[0] = f.pw / f.aw;
++        W.m[5] = f.ph / f.ah;
++        if (!m.sprite && (f.zoom != 1.0f || f.dy != 0.0f)) {
++            W.m[0] *= f.zoom;
++            W.m[5] *= f.zoom;
++            W.m[13] = f.dy;
+         }
+     } else if (persp) {
+-        W.m[0] = hor_widen();
++        W.m[0] = f.widen;
+     }
+     Mat S{};
+     S.m[0] = m.vp[2] * 0.5f;
+@@ -3929,33 +3942,11 @@ static Mat rec_pws(const RecMtx &m, bool mw, bool persp) {
+     return mul(mul(m.proj, W), S);
+ }
+ 
+-int gx_take_record(GxRecord &into) {
+-    Rec &R = g_rec;
+-    into.runs.clear();
+-    into.mtx.clear();
+-    into.raw.clear();
+-    if (!R.on) {
+-        into.v.clear();
+-        into.idx.clear();
+-        return 0;
+-    }
+-    into.v.swap(R.v);
+-    into.idx.swap(R.idx);
+-    R.v.clear();
+-    R.idx.clear();
+-    const uint32_t ntri = (uint32_t)(into.idx.size() / 3);
+-    into.runs.resize(R.runs.size());
+-    for (size_t r = 0; r < R.runs.size(); ++r) {
+-        GxRecRun &o = into.runs[r];
+-        o.st = R.runs[r].st;
+-        o.first = R.runs[r].first;
+-        o.id_lo = R.runs[r].id_lo;
+-        o.id_hi = R.runs[r].id_hi;
+-        o.count = (r + 1 < R.runs.size() ? R.runs[r + 1].first : ntri) - o.first;
+-    }
+-    const bool mw = menu_wide();
+-    into.mtx.resize(R.mtx.size());
+-    into.raw.resize(into.want_raw ? R.mtx.size() : 0);
++/* Each id's GxRecMatrix (and GxRecRaw when wanted) from its recorded
++   matrices and the frame's presentation `f`. */
++static void rec_make_mtx(GxRecord &into, const RecMtx *ms, size_t n, const PwsFrame &f) {
++    into.mtx.resize(n);
++    into.raw.resize(into.want_raw ? n : 0);
+     // proj x W x S is shared by every id with the same projection, viewport
+     // and menu-sprite bracket (nearly all of a frame's), so each id costs one
+     // product, pos x (proj W S), not three (the skinned title face has ~330
+@@ -3963,13 +3954,13 @@ int gx_take_record(GxRecord &into) {
+     const RecMtx *key = nullptr;
+     Mat pws;
+     bool persp = false;
+-    for (size_t k = 0; k < R.mtx.size(); ++k) {
+-        const RecMtx &m = R.mtx[k];
++    for (size_t k = 0; k < n; ++k) {
++        const RecMtx &m = ms[k];
+         if (!key || std::memcmp(&m.proj, &key->proj, sizeof m.proj) != 0 ||
+             std::memcmp(m.vp, key->vp, sizeof m.vp) != 0 || m.sprite != key->sprite) {
+             key = &m;
+             persp = m.proj.m[3] != 0.0f || m.proj.m[7] != 0.0f || m.proj.m[11] != 0.0f;
+-            pws = rec_pws(m, mw, persp);
++            pws = rec_pws(m, f, persp);
+         }
+         Mat t = mul(m.pos, pws);
+         if (into.want_raw) {
+@@ -3987,6 +3978,68 @@ int gx_take_record(GxRecord &into) {
+         std::memcpy(into.mtx[k].m, t.m, sizeof t.m);
+         into.mtx[k].persp = persp ? 1 : 0;
+     }
++}
++
++/* A deferred take's ids, swapped out of the recorder whole (a copy of the
++   title's ~490 was most of what deferring saved). One slot per GxRecord that
++   defers (the card's two job slots); a slot is touched only by its owner's
++   take and finish, which never overlap (the card takes into a job only once
++   its last present is done). */
++struct PendSlot {
++    const GxRecord *owner;
++    std::vector<RecMtx> v;
++};
++PendSlot g_pend[4];
++
++void gx_record_finish(GxRecord &into) {
++    if (into.pend_slot < 0) return;
++    PwsFrame f;
++    std::memcpy(&f, into.pend_frame, sizeof f);
++    const std::vector<RecMtx> &v = g_pend[into.pend_slot].v;
++    rec_make_mtx(into, v.data(), v.size(), f);
++    into.pend_slot = -1;
++}
++
++int gx_take_record(GxRecord &into, bool defer) {
++    Rec &R = g_rec;
++    into.runs.clear();
++    into.mtx.clear();
++    into.raw.clear();
++    into.pend_slot = -1;
++    if (!R.on) {
++        into.v.clear();
++        into.idx.clear();
++        return 0;
++    }
++    into.v.swap(R.v);
++    into.idx.swap(R.idx);
++    R.v.clear();
++    R.idx.clear();
++    const uint32_t ntri = (uint32_t)(into.idx.size() / 3);
++    into.runs.resize(R.runs.size());
++    for (size_t r = 0; r < R.runs.size(); ++r) {
++        GxRecRun &o = into.runs[r];
++        o.st = R.runs[r].st;
++        o.first = R.runs[r].first;
++        o.id_lo = R.runs[r].id_lo;
++        o.id_hi = R.runs[r].id_hi;
++        o.count = (r + 1 < R.runs.size() ? R.runs[r + 1].first : ntri) - o.first;
++    }
++    const PwsFrame f = pws_frame_now();
++    int slot = -1;
++    if (defer && !into.want_raw)
++        for (int i = 0; i < 4 && slot < 0; ++i)
++            if (g_pend[i].owner == &into || !g_pend[i].owner) slot = i;
++    if (slot >= 0) {
++        // the matrices as recorded, for gx_record_finish; the slot's last
++        // ones (made) go back to the recorder as its buffer
++        g_pend[slot].owner = &into;
++        g_pend[slot].v.swap(R.mtx);
++        into.pend_slot = slot;
++        std::memcpy(into.pend_frame, &f, sizeof f);
++    } else {
++        rec_make_mtx(into, R.mtx.data(), R.mtx.size(), f);
++    }
+     R.runs.clear();
+     R.mtx.clear();
+     R.on = 0;
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index 2b5bb0699..2d5c6680e 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -239,12 +239,22 @@ struct GxRecord {
+     // filled (one per mtx) only when the caller sets want_raw before taking
+     std::vector<GxRecRaw> raw;
+     bool want_raw = false;
++    // gx_take_record(into, true): where gx.cpp keeps each id's matrices as
++    // recorded (-1: none pending), and the frame's presentation then, which
++    // gx_record_finish makes into `mtx` -- on another thread if the caller likes
++    int pend_slot = -1;
++    float pend_frame[8] = {};
+ };
+ // This frame's record into `into` (its vectors swapped in, so the record
+ // survives the next gx_reset, and gx.cpp keeps `into`'s old capacity): 1 when
+ // the frame was recorded whole, 0 when it was not (SM64DS_GXREC off, a frame
+ // the recorder does not take, or one it stopped on); `into` is then emptied.
+-int gx_take_record(GxRecord &into);
++// defer (not with want_raw): `mtx` is left to gx_record_finish, which may run
++// on any thread once this has returned (the products are ~1.4 ms of a 3DS
++// title frame with the head up: the card's present makes them on core 2).
++int gx_take_record(GxRecord &into, bool defer = false);
++// A deferred take's `mtx` (nothing when there is none pending)
++void gx_record_finish(GxRecord &into);
+ // LEAN FRAMES (step 5.2b), for a card that draws every frame it keeps from
+ // the record: 1 makes every recorded frame ONLY recorded (no projected
+ // triangles), its polygon list made from the record wherever it is wanted
+diff --git a/port/ntr/ppu_sub.cpp b/port/ntr/ppu_sub.cpp
+index 79e09da31..313c02519 100644
+--- a/port/ntr/ppu_sub.cpp
++++ b/port/ntr/ppu_sub.cpp
+@@ -1446,6 +1446,7 @@ struct ScanSlot {
+     Span span[kMaxSpans];
+     uint8_t *bytes;
+     size_t cap;
++    unsigned misses;   /* scans drawn in a row since the last hand-back */
+     uint32_t out[SUB_H][SUB_W];
+ };
+ 
+@@ -1672,12 +1673,20 @@ void scan_cached(SubFramebuffer &fb, uint32_t dispcnt, const uint8_t *skip)
+     if (same) {
+         std::memcpy(fb.px, sl->out, sizeof fb.px);
+         ++g_scan_hits;
++        sl->misses = 0;
+         return;
+     }
+     scan_fast(fb, dispcnt, skip, g_obj, g_objwin);
+     ++g_scan_draws;
+     sl->valid = false;
+     if (n <= 0) return;
++    /* A SCREEN THAT CHANGES EVERY FRAME is saved every fourth draw once four
++       draws came in a row: the save below copies every input and the picture
++       (on the title's logo screen, its sparkles moving every frame, ~0.7 ms of
++       a scan on the 3DS) for a hand-back that does not come. A screen that
++       stops changing is handed back again within four scans; what is drawn
++       never depends on this. */
++    if (++sl->misses > 4 && (sl->misses & 3u) != 0) return;
+     size_t total = 0;
+     for (int i = 0; i < n; ++i) total += span[i].hi - span[i].lo;
+     if (total > sl->cap) {
+-- 
+2.55.0.windows.5
+

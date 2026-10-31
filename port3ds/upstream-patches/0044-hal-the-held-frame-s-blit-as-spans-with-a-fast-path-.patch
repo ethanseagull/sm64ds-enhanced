@@ -1,0 +1,203 @@
+From 240e1c4a51b5741c3da5c64040ecd83bd6bc72f1 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 23:32:34 -0700
+Subject: [PATCH] hal: the held frame's blit as spans, with a fast path for
+ repeated cells
+
+Every cell of a frame held on the card went out through its own
+blit_ov_cell call, and each covered cell re-derived its placement and
+verdicts. The blit now merges a row's adjacent cells with the same word and
+mask bits into one span (flushed before any other write to the picture or
+the mask, so the writes keep their order), and a cell equal to its left
+neighbour (colour, owner, priority, box cursor bit, element label, window
+bit) reuses that neighbour's decisions. SM64DS_COMPA_ZONES now also splits
+the HUD row and label work into their own zones and counts the blit's cells,
+fast cells and spans. Pictures identical; the pause screen's blit ~7% less
+in Azahar (most of its cost is the per-position scan, not the writes).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 91 +++++++++++++++++++++++++++++----
+ 1 file changed, 82 insertions(+), 9 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index 4641fcf6d..dae670468 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -131,6 +131,7 @@ struct CaZones {
+     int on = -1;
+     double acc[2][10] = {};
+     unsigned long long n[2] = {};
++    unsigned long long cells = 0, fast = 0, spans = 0;   /* the blit's cells, of them by the fast path, spans written */
+     std::chrono::steady_clock::time_point t;
+     int live = 0;
+     static void report();
+@@ -151,12 +152,14 @@ struct CaZones {
+ };
+ CaZones g_cz;
+ void CaZones::report() {
+-    static const char *nm[10] = {"h1_decide", "settle", "regs_to_default", "bg_loop_obj", "to_blit", "blit", "tail", "", "", ""};
++    static const char *nm[10] = {"h1_decide", "settle", "regs_to_default", "bg_loop_obj", "to_blit", "blit", "tail", "hud_row", "hud_labels", ""};
+     for (int l = 0; l < 2; ++l) {
+         if (!g_cz.n[l]) continue;
+         std::fprintf(stderr, "[compa] lift=%d frames %llu mean ms:", l, g_cz.n[l]);
+-        for (int z = 0; z < 7; ++z) std::fprintf(stderr, " %s %.3f", nm[z], g_cz.acc[l][z] / (double)g_cz.n[l]);
+-        std::fprintf(stderr, "\n");
++        for (int z = 0; z < 9; ++z) std::fprintf(stderr, " %s %.3f", nm[z], g_cz.acc[l][z] / (double)g_cz.n[l]);
++        std::fprintf(stderr, "; blit cells %llu (fast %llu), spans %llu a frame\n",
++                     g_cz.cells / (g_cz.n[0] + g_cz.n[1]), g_cz.fast / (g_cz.n[0] + g_cz.n[1]),
++                     g_cz.spans / (g_cz.n[0] + g_cz.n[1]));
+     }
+ }
+ }
+@@ -170,6 +173,7 @@ extern "C" void port_compa_zones_report(void)
+         g_cz.n[l] = 0;
+         for (double &a : g_cz.acc[l]) a = 0;
+     }
++    g_cz.cells = g_cz.fast = g_cz.spans = 0;
+ }
+ 
+ /* THE TOP ENGINE'S OBJ DISPLAY SHIFT, in DS rows, from hal/screen_gap.cpp.
+@@ -4059,7 +4063,9 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+         }
+     }
+     const bool bandsplit = hud_bandsplit_env();
++    g_cz.mark(7);
+     if (ntr::widescreen && !bandsplit) hudelem::resolve(band_l, band_r, margin);
++    g_cz.mark(8);
+     /* TWO QUESTIONS, KEPT APART SO THE A/B ARM STILL MEASURES. `shown3d` is
+        whether the 3D layer is in the picture at all, which decides whether the
+        coverage mask means anything; `honour3d` is whether this run obeys its
+@@ -4118,18 +4124,79 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     unsigned char bm_wrow[256];
+     int bm_wrow_y = -1;
+     const unsigned bm_first = rd16(kRegBase + 0x50) & 0x3F;
++    /* THE CELLS OF A HELD FRAME GO OUT AS SPANS (3DS lane). Every cell of a
++       frame held on the card ends in blit_ov_cell, one call a DS cell; a
++       pause screen or a dialogue covers all 49152 of them, and the per-cell
++       call was most of this zone there. A cell that continues the pending
++       span -- the same host rows, the next host columns, the same word and
++       mask bits -- joins it; anything else (another cell, or any other write
++       to fb or g_bm below) sends the span first, so the writes land in the
++       order the per-cell loop made them and the picture is the same. */
++    struct OvSpan { int hy0, hy1, hx0, hx1; uint32_t word; unsigned char bits; bool live; };
++    OvSpan sp{};
++    auto span_flush = [&] {
++        if (!sp.live) return;
++        if (g_cz.on > 0) ++g_cz.spans;
++        blit_ov_cell(fb, sp.hx0, sp.hx1 - sp.hx0, sp.hy0, sp.hy1, sp.word, bm_on, sp.bits);
++        sp.live = false;
++    };
++    auto span_cell = [&](int hx0, int bw, int hy0, int hy1, uint32_t word, unsigned char bits) {
++        if (sp.live && sp.hx1 == hx0 && sp.hy0 == hy0 && sp.hy1 == hy1 && sp.word == word &&
++            sp.bits == bits) {
++            sp.hx1 += bw;
++            return;
++        }
++        span_flush();
++        sp = OvSpan{hy0, hy1, hx0, hx0 + bw, word, bits, true};
++    };
++    /* AND A CELL THAT IS ITS LEFT NEIGHBOUR AGAIN TAKES ITS DECISIONS. Every
++       verdict below is a function of the cell (colour, owner, priority, the
++       box cursor bit), its element label (the wide placement), its window
++       bit (the brightness verdict) and the frame: so a cell equal to the one
++       just placed in all of those, one column on, lands at the same offset
++       with the same word, and only its columns are new. A pause screen's
++       backdrop is 49152 such cells behind the 3D. f_ok: the last cell of
++       this row went out through span_cell (pass 0, no card blit, no band
++       split control). */
++    bool f_ok = false;
++    int f_x = -2, f_off = 0;
++    Cell f_c{};
++    uint32_t f_word = 0;
++    unsigned char f_bits = 0;
++    auto f_note = [&](int pass_, int x, const Cell &cc, int hx0, uint32_t word, unsigned char bits) {
++        f_ok = !pass_ && !gpu_blit && !bandsplit;
++        f_x = x;
++        f_c = cc;
++        f_off = hx0 - (ntr::widescreen ? s_colx0[x] : x * sx);
++        f_word = word;
++        f_bits = bits;
++    };
+     for (int pass = 0; pass < 2; ++pass) {
+     if (pass && !g_hud_row_live) break;
+     /* pass 0 = the DS plane, pass 1 = the moved coin block's own plane (drawn after, so it covers what is under it) */
+     for (int y = 0; y < 192; ++y) {
+         if (!pass && g_a_clean[y]) continue;   /* no hit in this row of g_a */
+         const uint32_t quiet = pass ? 0u : g_a_quiet[y];
++        f_ok = false;
+         for (int x = 0; x < 256; ++x) {
+             if ((quiet >> (x >> 3)) & 1u) { x |= 7; continue; }   /* no hit in these 8 */
+             const Cell &gc = pass ? g_hud_cells[y][x] : g_a[y][x];
+             if (!gc.hit) continue;
+             if (pass && !g_hud_row[y][x]) continue;   /* g_hud_cells is not cleared per frame: only this frame's moved cells */
+             if (!pass && g_hud_erase && g_hud_row_live && g_hud_row[y][x]) continue;
++            if (g_cz.on > 0) ++g_cz.cells;
++            if (f_ok && x == f_x + 1 && gc.color == f_c.color && gc.owner == f_c.owner &&
++                gc.prio == f_c.prio && gc.msgcur == f_c.msgcur &&
++                (!ntr::widescreen || hudelem::g_lbl[y][x] == hudelem::g_lbl[y][x - 1]) &&
++                (!bm_on || !((bm_wrow[x] ^ bm_wrow[x - 1]) & 0x20))) {
++                const int ux = ntr::widescreen ? s_colx0[x] : x * sx;
++                const int ubw = ntr::widescreen ? s_colx0[x + 1] - s_colx0[x] : sx;
++                span_cell(ux + f_off, ubw, s_rowy0[y], s_rowy0[y + 1], f_word, f_bits);
++                if (g_cz.on > 0) ++g_cz.fast;
++                f_x = x;
++                continue;
++            }
++            f_ok = false;
+             const uint32_t c = gc.color;
+             /* horizontal placement of this DS column's block. In 4:3 (toggle
+                off) ntr::widescreen is false and this is the plain x*sx block; in
+@@ -4238,6 +4305,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                 continue;
+             }
+             if (ovl3d && lcv == 1) {
++                span_flush();
+                 int run0 = -1;
+                 for (int hy = hy0; hy <= hy1; ++hy) {
+                     const bool inb = hy < hy1 && lc_overlay_in_band(lcow, hy);
+@@ -4308,11 +4376,13 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                 /* the owning 2D layer is in FRONT of the 3D layer (or there is
+                    no 3D layer in the picture): the old unconditional write */
+                 if (ovl3d) {
+-                    blit_ov_cell(fb, hx0, bw, hy0, hy1,
+-                                 (c & 0x00FFFFFFu) | (GX_OV_FRONT << 24),
+-                                 bm_on, (unsigned char)((bmv ? 4u : 0u) | 8u));
++                    const uint32_t word = (c & 0x00FFFFFFu) | (GX_OV_FRONT << 24);
++                    const unsigned char bits = (unsigned char)((bmv ? 4u : 0u) | 8u);
++                    span_cell(hx0, bw, hy0, hy1, word, bits);
++                    f_note(pass, x, gc, hx0, word, bits);
+                     continue;
+                 }
++                span_flush();
+                 for (int hy = hy0; hy < hy1; ++hy)
+                     for (int dx = 0; dx < bw; ++dx) {
+                         const int hx = hx0 + dx;
+@@ -4331,11 +4401,13 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+             /* BEHIND the 3D layer: it may only fill where 3D drew nothing */
+             if (ovl3d) {
+                 ntr::gx_card_note_behind();
+-                blit_ov_cell(fb, hx0, bw, hy0, hy1,
+-                             (c & 0x00FFFFFFu) | (GX_OV_BEHIND << 24),
+-                             bm_on, (unsigned char)((bmv ? 4u : 0u) | 16u));
++                const uint32_t word = (c & 0x00FFFFFFu) | (GX_OV_BEHIND << 24);
++                const unsigned char bits = (unsigned char)((bmv ? 4u : 0u) | 16u);
++                span_cell(hx0, bw, hy0, hy1, word, bits);
++                f_note(pass, x, gc, hx0, word, bits);
+                 continue;
+             }
++            span_flush();
+             for (int hy = hy0; hy < hy1; ++hy)
+                 for (int dx = 0; dx < bw; ++dx) {
+                     const int hx = hx0 + dx;
+@@ -4352,6 +4424,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+         }
+     }
+     }   /* the HUD pass loop (menu1 HUD1) */
++    span_flush();
+     g_cz.mark(5);
+     if (gpu_blit) {
+         port_gpu_twod_rects(g_tw_inst, g_tw_n);
+-- 
+2.55.0.windows.5
+

@@ -1,0 +1,136 @@
+From e7fc839f2846fa84910d6d00c8b788f7d9660f0c Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 14:53:57 -0700
+Subject: [PATCH] ntr: backup can defer persistence to its host
+
+set_deferred(true): write() only updates the image and marks it dirty, and
+neither read() nor write() re-reads the file; the host takes the dirty
+image (take_dirty) and writes it where it likes (persist). For a host with
+one game process and a slow medium: on the 3DS one save is sixteen card
+writes, each a whole-file re-read and replace, 3.8-5 s in one frame. Off by
+default; the PC keeps the per-write re-read its two-window guard needs.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/backup.cpp           | 36 ++++++++++++++++++++++++++++++-----
+ port/ntr/include/ntr/backup.h | 15 +++++++++++++++
+ 2 files changed, 46 insertions(+), 5 deletions(-)
+
+diff --git a/port/ntr/backup.cpp b/port/ntr/backup.cpp
+index cbca1755f..c89145fcd 100644
+--- a/port/ntr/backup.cpp
++++ b/port/ntr/backup.cpp
+@@ -208,6 +208,9 @@ bool          g_fresh = true;      // no file existed: this is a new cartridge
+ char          g_path[1024];
+ unsigned char g_image[kSize];
+ Stats         g_stats;
++// set_deferred: write() only updates g_image; the host persists it later.
++bool          g_deferred = false;
++bool          g_dirty = false;     // g_image has writes the file lacks
+ 
+ bool trace_on()
+ {
+@@ -316,8 +319,8 @@ void open_once()
+         std::fprintf(stderr, "[backup] loaded %s\n", g_path);
+ }
+ 
+-// Persist the whole image through a per-process temp and a replacing move.
+-bool flush()
++// Persist a whole image through a per-process temp and a replacing move.
++bool write_image(const unsigned char *img)
+ {
+     // Once per process: a failing medium must not spam a play log.
+     static bool said = false;
+@@ -342,7 +345,7 @@ bool flush()
+         }
+         return false;
+     }
+-    bool ok = std::fwrite(g_image, 1, sizeof g_image, f) == (size_t)kSize;
++    bool ok = std::fwrite(img, 1, (size_t)kSize, f) == (size_t)kSize;
+     if (std::fflush(f) != 0) ok = false;
+     if (std::fclose(f) != 0) ok = false;
+     if (!ok) {
+@@ -386,6 +389,8 @@ bool flush()
+     return true;
+ }
+ 
++bool flush() { return write_image(g_image); }
++
+ // THE FILE IS THE CHIP, NOT THIS PROCESS'S COPY OF IT (run hunt2, lane
+ // SAVELOSS1). g_image is loaded once, at the first card access -- for a
+ // title boot that is the file select's read of all three files -- and
+@@ -515,7 +520,7 @@ bool read(unsigned addr, void *dst, unsigned len)
+     open_once();
+     if (!dst || !span_ok(addr, len)) return false;
+     MediumLock lock;
+-    refresh_from_disk();
++    if (!g_deferred) refresh_from_disk();
+     std::memcpy(dst, g_image + addr, len);
+     ++g_stats.reads;
+     if (trace_on())
+@@ -528,14 +533,35 @@ bool write(unsigned addr, const void *src, unsigned len)
+     open_once();
+     if (!src || !span_ok(addr, len)) return false;
+     MediumLock lock;
+-    refresh_from_disk();
++    if (!g_deferred) refresh_from_disk();
+     std::memcpy(g_image + addr, src, len);
+     ++g_stats.writes;
+     if (trace_on())
+         std::fprintf(stderr, "[backup] write %04x +%u\n", addr, len);
++    if (g_deferred) {
++        g_dirty = true;
++        return true;
++    }
+     return flush();
+ }
+ 
++void set_deferred(bool on)
++{
++    open_once();
++    if (!on && g_dirty && flush()) g_dirty = false;
++    g_deferred = on;
++}
++
++bool take_dirty(unsigned char *out)
++{
++    if (!g_dirty) return false;
++    std::memcpy(out, g_image, sizeof g_image);
++    g_dirty = false;
++    return true;
++}
++
++bool persist(const unsigned char *img) { return write_image(img); }
++
+ bool verify(unsigned addr, const void *src, unsigned len)
+ {
+     open_once();
+diff --git a/port/ntr/include/ntr/backup.h b/port/ntr/include/ntr/backup.h
+index e261b7cca..a4c02a69b 100644
+--- a/port/ntr/include/ntr/backup.h
++++ b/port/ntr/include/ntr/backup.h
+@@ -43,6 +43,21 @@ bool write(unsigned addr, const void *src, unsigned len);   // persists
+ bool verify(unsigned addr, const void *src, unsigned len);
+ 
+ // Statistics, for proofs and traces. Cheap; no I/O.
++// DEFERRED PERSISTENCE, for a host with ONE game process and a slow medium
++// (the 3DS: one save is sixteen card writes, and the per-write re-read and
++// whole-file replace below cost ~0.25 s each on its SD card, 3.8-5 s in one
++// frame). With it on, write() only updates the image in memory and marks it
++// dirty, and neither read() nor write() re-reads the file: no other process
++// can change it. The host takes the dirty image (take_dirty, on the thread
++// that runs the game, so a burst of writes is taken whole) and persists it
++// where it likes (persist: the same temp-and-replace as write(), on any
++// thread, from the caller's own copy). Turning it off persists anything
++// still dirty. The PC keeps it off: there, two windows on one save need the
++// re-read (refresh_from_disk).
++void set_deferred(bool on);
++bool take_dirty(unsigned char *out);   // out: kSize bytes; false when clean
++bool persist(const unsigned char *img);
++
+ struct Stats {
+     unsigned long long reads;
+     unsigned long long writes;
+-- 
+2.55.0.windows.5
+

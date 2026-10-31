@@ -1,0 +1,77 @@
+From 15bfb57b4b67750f441454c945df3a63542ee2fb Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 04:47:02 -0700
+Subject: [PATCH] ntr: the record hands each id's pos and proj x W x S on
+ request (GxRecRaw)
+
+For interpolation on the card (port3ds interp3ds.cpp): an in-between frame
+blends each id's position matrix between two ticks and folds it as
+gx_take_record does. GxRecord::want_raw asks for them; off, nothing changes.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp           |  6 ++++++
+ port/ntr/include/ntr/gx.h | 11 +++++++++++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index f6407a254..caf3b06ea 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -3867,6 +3867,7 @@ int gx_take_record(GxRecord &into) {
+     Rec &R = g_rec;
+     into.runs.clear();
+     into.mtx.clear();
++    into.raw.clear();
+     if (!R.on) {
+         into.v.clear();
+         into.idx.clear();
+@@ -3888,6 +3889,7 @@ int gx_take_record(GxRecord &into) {
+     }
+     const bool mw = menu_wide();
+     into.mtx.resize(R.mtx.size());
++    into.raw.resize(into.want_raw ? R.mtx.size() : 0);
+     // proj x W x S is shared by every id with the same projection, viewport
+     // and menu-sprite bracket (nearly all of a frame's), so each id costs one
+     // product, pos x (proj W S), not three (the skinned title face has ~330
+@@ -3904,6 +3906,10 @@ int gx_take_record(GxRecord &into) {
+             pws = rec_pws(m, mw, persp);
+         }
+         Mat t = mul(m.pos, pws);
++        if (into.want_raw) {
++            std::memcpy(into.raw[k].pos, m.pos.m, sizeof m.pos.m);
++            std::memcpy(into.raw[k].pws, pws.m, sizeof pws.m);
++        }
+         for (int i = 0; i < 12; ++i) t.m[i] *= FX12;   // rows 0-2: the raw coordinates' scale
+         std::memcpy(into.mtx[k].m, t.m, sizeof t.m);
+         into.mtx[k].persp = persp ? 1 : 0;
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index 82ac9e2d1..fd6bdd4cf 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -214,11 +214,22 @@ struct GxRecMatrix {
+     float m[16];
+     uint8_t persp;
+ };
++// An id's matrix in its two factors (interpolation, port3ds interp3ds.cpp):
++// m = pos x pws with rows 0-2 times 1/4096, pos the position matrix (model to
++// view, the DS's row-vector form), pws the projection, widen and viewport
++// map gx_take_record folded in.
++struct GxRecRaw {
++    float pos[16];
++    float pws[16];
++};
+ struct GxRecord {
+     std::vector<GxRecVertex> v;
+     std::vector<uint16_t> idx;
+     std::vector<GxRecRun> runs;
+     std::vector<GxRecMatrix> mtx;
++    // filled (one per mtx) only when the caller sets want_raw before taking
++    std::vector<GxRecRaw> raw;
++    bool want_raw = false;
+ };
+ // This frame's record into `into` (its vectors swapped in, so the record
+ // survives the next gx_reset, and gx.cpp keeps `into`'s old capacity): 1 when
+-- 
+2.55.0.windows.5
+

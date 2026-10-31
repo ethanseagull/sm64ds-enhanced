@@ -1,0 +1,55 @@
+From 16d146f8c0e5adb7e7a114177d12ba60bf96d26c Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 23:28:26 -0700
+Subject: [PATCH] ntr: NTR_WIDE_3DS, a 320x192 (5:3) tier for the 3DS's 400x240
+ top screen
+
+The same shape as NTR_WIDE169 at the 3DS's size: the height anchored at
+192, the width its 5:3 partner, widescreen on from the start, so gx.cpp's
+Hor+ widen, the compositor's HUD reanchor and the pillarboxed bottom panel
+all take their wide arms.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/include/ntr/ppu.h | 9 +++++++++
+ port/ntr/ppu.cpp           | 4 ++--
+ 2 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/port/ntr/include/ntr/ppu.h b/port/ntr/include/ntr/ppu.h
+index 902f2f56a..7322498cc 100644
+--- a/port/ntr/include/ntr/ppu.h
++++ b/port/ntr/include/ntr/ppu.h
+@@ -76,6 +76,15 @@ constexpr int SCREEN_H = 768;
+    covered by this first pass -- levels use the corner-panel presentation. */
+ constexpr int SCREEN_W = 1024;
+ constexpr int SCREEN_H = 576;
++#elif defined(NTR_WIDE_3DS)
++/* THE 3DS'S WIDE TOP SCREEN (port3ds, its GAME3DS_WIDE build). The top panel
++   is 400x240, a 5:3 picture; at the DS's own 192 rows that is 320 wide. The
++   same shape as NTR_WIDE169 at a smaller size: the height anchored at 192,
++   the width its 5:3 partner, the 3D widened Hor+ by gx.cpp, the top HUD
++   reanchored by the message compositor, the bottom panel pillarboxed at the
++   uniform scale 1 (pan_x0 32). The card scales the whole picture to 400x240. */
++constexpr int SCREEN_W = 320;
++constexpr int SCREEN_H = 192;
+ #else
+ constexpr int SCREEN_W = 256;
+ constexpr int SCREEN_H = 192;
+diff --git a/port/ntr/ppu.cpp b/port/ntr/ppu.cpp
+index 1dad4707c..069d35dd3 100644
+--- a/port/ntr/ppu.cpp
++++ b/port/ntr/ppu.cpp
+@@ -37,8 +37,8 @@ int active_h = 384;
+ int active_w = SCREEN_W;
+ int active_h = SCREEN_H;
+ #endif
+-#ifdef NTR_WIDE169
+-// The fixed-compile 16:9 tier: the wide branches are ALWAYS on, so the runtime
++#if defined(NTR_WIDE169) || defined(NTR_WIDE_3DS)
++// The fixed-compile wide tiers (16:9, and the 3DS's 5:3): the wide branches are ALWAYS on, so the runtime
+ // flag they now read is true from the start. (NTR_WIDE_RT starts 4:3 and flips
+ // this in configure_aspect; every 4:3 tier leaves it false.)
+ bool widescreen = true;
+-- 
+2.55.0.windows.5
+

@@ -1,0 +1,76 @@
+From 6564ce63cc6019696ec902cc625ce2b96993a835 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 17:05:02 -0700
+Subject: [PATCH 02/13] port/hal: build under the 3DS port's GCC toolchain
+ (gates 2-3a)
+
+dsstate_seg.h: the grouped-section pragmas are MSVC-only; on SM64DS_HOST_3DS
+the DSSTATE markers are no-ops and the dev savestate is not offered.
+heap_vtable.cpp: include windows.h and walk the stack in Crash() only on
+_WIN32; elsewhere report the caller and abort.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/dsstate_seg.h   | 8 ++++++++
+ port/hal/heap_vtable.cpp | 6 ++++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/port/hal/dsstate_seg.h b/port/hal/dsstate_seg.h
+index 5aeac962b..0c3095086 100644
+--- a/port/hal/dsstate_seg.h
++++ b/port/hal/dsstate_seg.h
+@@ -54,6 +54,13 @@
+  * The cost is that formerly-uninitialized hosted globals are now zero-filled in
+  * the image rather than demand-zeroed (~35 KB of exe). They stay writable: the
+  * `write` attribute is part of what is being pinned. */
++#ifdef SM64DS_HOST_3DS
++/* The New 3DS port (GCC) has no grouped-section pragmas, so it does not gather
++   the hosted globals and does not offer the dev savestate. The markers are
++   no-ops there; every global stays in ordinary .bss/.data. */
++#define DSSTATE_BEGIN
++#define DSSTATE_END
++#else
+ #pragma section(".dsstate$mmm", read, write)
+ 
+ /* Route every plain global between these two markers into the captured span.
+@@ -86,5 +93,6 @@
+ #define DSSTATE_END                                                            \
+     __pragma(bss_seg())                                                        \
+     __pragma(data_seg())
++#endif /* SM64DS_HOST_3DS */
+ 
+ #endif /* PORT_HAL_DSSTATE_SEG_H */
+diff --git a/port/hal/heap_vtable.cpp b/port/hal/heap_vtable.cpp
+index 5f9019a1d..827f34077 100644
+--- a/port/hal/heap_vtable.cpp
++++ b/port/hal/heap_vtable.cpp
+@@ -18,7 +18,9 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #define WIN32_LEAN_AND_MEAN
++#ifdef _WIN32
+ #include <windows.h>
++#endif
+ #include "dsstate_seg.h"
+ 
+ typedef unsigned int u32;
+@@ -213,12 +215,16 @@ void *Allocate(u32 size, int align, Heap *heap)
+ extern "C" void Crash(void)
+ {
+     fprintf(stderr, "FATAL: game Crash() reached\n");
++#ifdef _WIN32
+     void *frames[12];
+     unsigned n = CaptureStackBackTrace(0, 12, frames, 0);
+     char *base = (char *)GetModuleHandleA(0);
+     for (unsigned i = 0; i < n; ++i)
+         fprintf(stderr, "  frame %u: +0x%08x\n", i,
+                 (unsigned)((char *)frames[i] - base));
++#else
++    fprintf(stderr, "  caller: %p\n", __builtin_return_address(0));
++#endif
+     abort();
+ }
+ #pragma comment(linker, "/alternatename:?Crash@@YAXXZ=_Crash")
+-- 
+2.55.0.windows.5
+

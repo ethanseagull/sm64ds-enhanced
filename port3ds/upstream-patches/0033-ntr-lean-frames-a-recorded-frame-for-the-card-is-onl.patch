@@ -1,0 +1,381 @@
+From 5b77f0c13dea8542349b4d5a51be1e580d637221 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 22:30:52 -0700
+Subject: [PATCH] ntr: lean frames: a recorded frame for the card is only
+ recorded
+
+gx_record_configure(1): vertex() stores the vertex and assembles its triangles as record indices by push_vertex's rules; project(), the near clip and the triangle list are not run. The list is made from the record by rec_materialise wherever it is wanted: gx_render for a frame the card does not take whole, the settle and capture (which now pass the held frame's triangles in GxGpuFrame::tris), gx_record_to_list, and gx_polygons (a copy, so mid-frame probes read the triangles so far). gx_render's pre-offer flags come from the runs; the frame's ortho decision from each triangle's projection.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp           | 186 ++++++++++++++++++++++++++++++++++----
+ port/ntr/include/ntr/gx.h |  15 ++-
+ 2 files changed, 181 insertions(+), 20 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 3eb6caeba..6bfc01b12 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -1799,26 +1799,42 @@ struct RecRun {
+     uint8_t tex_wrap, tex_scale;
+     uint32_t tex_id, poly_attr, teximage;
+ };
++/* LEAN FRAMES (step 5.2b, gx_record_configure): the card draws the record,
++   so a recorded frame is ONLY recorded -- vertex() stores the vertex and
++   assembles its triangles as indices by push_vertex's own rules (Rec::strip
++   is the primitive's record indices, as g.strip is its vertices), and
++   project(), the near clip and the 200-byte triangles are not run at all.
++   Whatever wants triangles gets them made from the record, by the code that
++   always made them (rec_materialise): gx_render for a frame the card does not
++   take whole, the card's settle and capture, gx_record_to_list for a card
++   that cannot draw the record, and gx_polygons (a copy, Rec::view, so a probe
++   in the middle of a frame reads the triangles so far). */
+ struct Rec {
+     int on;                // this frame is being recorded
+     int bad;               // why recording stopped this frame (0 it did not)
++    int lean;              // and ONLY recorded: g.tris is empty until `listed`
++    int listed;            // a lean frame's triangles were put in g.tris
+     uint32_t strip_base;   // the record index of g.strip[0]
+     std::vector<RecVtx> v;
+     std::vector<uint32_t> idx;
+     std::vector<RecRun> runs;
+     std::vector<RecMtx> mtx;
++    std::vector<uint32_t> strip;    // lean: the primitive's record indices
++    std::vector<GxTriangle> view;   // lean: gx_polygons' copy
+ };
+ Rec g_rec;
+ enum { REC_OK = 0, REC_IDS, REC_STRIP };
++int g_rec_lean_cfg;   // gx_record_configure
+ 
+-// SM64DS_GXREC: 1 record and check every frame (rec_check), 2 record only.
++// SM64DS_GXREC: 1 record and check every frame (rec_check), 2 record only;
++// unset, a card that asked for lean frames (gx_record_configure) records.
+ int rec_wanted() {
+     static int v = -1;
+     if (v < 0) {
+         const char *e = getenv("SM64DS_GXREC");
+         v = (e && *e >= '1' && *e <= '9') ? *e - '0' : 0;
+     }
+-    return v;
++    return v ? v : (g_rec_lean_cfg ? 2 : 0);
+ }
+ 
+ // gx_reset: a new frame's record. Not with the smoother (its grids and
+@@ -1830,8 +1846,11 @@ void rec_frame_begin() {
+     R.idx.clear();
+     R.runs.clear();
+     R.mtx.clear();
++    R.strip.clear();
+     R.bad = REC_OK;
+     R.on = rec_wanted() && smooth_lvl() <= 0 && !g_ip_armed && !g_stargeo.on;
++    R.lean = R.on && g_rec_lean_cfg;
++    R.listed = 0;
+ }
+ 
+ void rec_stop(int why) {
+@@ -1858,16 +1877,10 @@ inline void rec_vertex(int16_t x, int16_t y, int16_t z, bool new_id) {
+     R.v.push_back({x, y, z, (uint16_t)(R.mtx.size() - 1), g.color, g.u, g.v});
+ }
+ 
+-// emit_tri: the three corners must be rows of the strip push_vertex keeps.
+-inline void rec_tri(const GxVertex &a, const GxVertex &b, const GxVertex &c, bool new_run) {
++// One triangle into the record: three record indices, under the run the live
++// state makes (a new one at the first triangle after a state change).
++inline void rec_push_tri(uint32_t ia, uint32_t ib, uint32_t ic, bool new_run) {
+     Rec &R = g_rec;
+-    const GxVertex *s = g.strip.data();
+-    const size_t n = g.strip.size();
+-    const size_t ia = (size_t)(&a - s), ib = (size_t)(&b - s), ic = (size_t)(&c - s);
+-    if (!s || ia >= n || ib >= n || ic >= n || R.strip_base + n > R.v.size()) {
+-        rec_stop(REC_STRIP);
+-        return;
+-    }
+     if (new_run || R.runs.empty()) {
+         RecRun r{};
+         r.first = (uint32_t)(R.idx.size() / 3);
+@@ -1882,9 +1895,78 @@ inline void rec_tri(const GxVertex &a, const GxVertex &b, const GxVertex &c, boo
+         r.teximage = g_teximage;
+         R.runs.push_back(r);
+     }
+-    R.idx.push_back(R.strip_base + (uint32_t)ia);
+-    R.idx.push_back(R.strip_base + (uint32_t)ib);
+-    R.idx.push_back(R.strip_base + (uint32_t)ic);
++    R.idx.push_back(ia);
++    R.idx.push_back(ib);
++    R.idx.push_back(ic);
++}
++
++// emit_tri: the three corners must be rows of the strip push_vertex keeps.
++inline void rec_tri(const GxVertex &a, const GxVertex &b, const GxVertex &c, bool new_run) {
++    Rec &R = g_rec;
++    const GxVertex *s = g.strip.data();
++    const size_t n = g.strip.size();
++    const size_t ia = (size_t)(&a - s), ib = (size_t)(&b - s), ic = (size_t)(&c - s);
++    if (!s || ia >= n || ib >= n || ic >= n || R.strip_base + n > R.v.size()) {
++        rec_stop(REC_STRIP);
++        return;
++    }
++    rec_push_tri(R.strip_base + (uint32_t)ia, R.strip_base + (uint32_t)ib,
++                 R.strip_base + (uint32_t)ic, new_run);
++}
++
++/* A lean frame's triangle: emit_tri's counting, and the frame's depth key.
++   push_screen_tri and push_unclipped_tri note a triangle drawn through a
++   constant-w projection (g_frame_ortho: the frame keeps Z, frame_wdepth);
++   the projection is the one of the triangle's newest vertex. */
++inline void rec_lean_tri(uint32_t a, uint32_t b, uint32_t c) {
++    Rec &R = g_rec;
++    ++g_s5_frame[S5_TRIS];
++    const bool new_run = g_s5_state_dirty;
++    if (new_run) { ++g_s5_frame[S5_RUNS]; g_s5_state_dirty = false; }
++    const uint32_t last = a > b ? (a > c ? a : c) : (b > c ? b : c);
++    const Mat &pj = R.mtx[R.v[last].id].proj;
++    if (pj.m[3] == 0.0f && pj.m[7] == 0.0f && pj.m[11] == 0.0f) g_frame_ortho = true;
++    rec_push_tri(a, b, c, new_run);
++}
++
++// vertex(), lean: push_vertex's assembly, on record indices.
++inline void rec_lean_vertex() {
++    Rec &R = g_rec;
++    R.strip.push_back((uint32_t)R.v.size() - 1);
++    const size_t n = R.strip.size();
++    const uint32_t *s = R.strip.data();
++    switch (g.prim) {
++        case 0:                                        // separate triangles
++            if (n == 3) {
++                rec_lean_tri(s[0], s[1], s[2]);
++                R.strip.clear();
++            }
++            break;
++        case 1:                                        // separate quads
++            if (n == 4) {
++                rec_lean_tri(s[0], s[1], s[2]);
++                rec_lean_tri(s[0], s[2], s[3]);
++                R.strip.clear();
++            }
++            break;
++        case 2:                                        // triangle strip
++            if (n >= 3) {
++                const size_t i0 = n - 3, i1 = n - 2, i2 = n - 1;
++                if ((n - 3) & 1)                        // alternate winding
++                    rec_lean_tri(s[i1], s[i0], s[i2]);
++                else
++                    rec_lean_tri(s[i0], s[i1], s[i2]);
++            }
++            break;
++        case 3:                                        // quad strip
++            if (n >= 4 && (n % 2) == 0) {
++                const size_t i0 = n - 4, i1 = n - 3, i2 = n - 2, i3 = n - 1;
++                rec_lean_tri(s[i0], s[i1], s[i3]);
++                rec_lean_tri(s[i0], s[i3], s[i2]);
++            }
++            break;
++        default: break;
++    }
+ }
+ 
+ void emit_tri(const GxVertex &a, const GxVertex &b, const GxVertex &c,
+@@ -2003,7 +2085,13 @@ void vertex(int16_t x, int16_t y, int16_t z) {
+     ++g_s5_frame[S5_VERTS];
+     const bool new_id = g_s5_mtx_dirty;
+     if (new_id) { ++g_s5_frame[S5_MTX]; g_s5_mtx_dirty = false; }
+-    if (g_rec.on) rec_vertex(x, y, z, new_id);
++    if (g_rec.on) {
++        rec_vertex(x, y, z, new_id);
++        if (g_rec.lean) {   // step 5.2b: recorded only (see struct Rec)
++            if (g_rec.on) rec_lean_vertex();
++            return;
++        }
++    }
+     /* The raw half of the vertex, for the shape store. With the setting
+        absent it is filled with a pair of generations that can never match,
+        so the store is unreachable rather than merely unused. */
+@@ -2115,6 +2203,21 @@ void rec_materialise(std::vector<GxTriangle> &out) {
+     R.on = on;
+ }
+ 
++/* A lean frame's triangles into g.tris (struct Rec): made from the record
++   when the list is wanted, and made again if triangles were recorded since. */
++uint32_t g_rec_listed_tris;
++void rec_lean_list() {
++    Rec &R = g_rec;
++    if (!R.lean || !R.on) return;
++    const uint32_t n = (uint32_t)(R.idx.size() / 3);
++    if (R.listed && g_rec_listed_tris == n) return;
++    g.tris.clear();
++    rec_materialise(R.view);
++    g.tris.swap(R.view);
++    R.listed = 1;
++    g_rec_listed_tris = n;
++}
++
+ // Two triangles alike in everything the card and the raster read (the
+ // normals, which only the smoother reads, aside); floats compared bit for bit.
+ bool rec_same_tri(const GxTriangle &p, const GxTriangle &q) {
+@@ -2134,7 +2237,7 @@ bool rec_same_tri(const GxTriangle &p, const GxTriangle &q) {
+    with its polygon list. Every 120 frames a [gxrec] line: how many were
+    recorded and alike, and what was in them. */
+ void rec_check() {
+-    if (rec_wanted() != 1) return;
++    if (rec_wanted() != 1 || g_rec.lean) return;
+     static unsigned frames, recorded, alike, differ, stopped[3], shown;
+     static unsigned long long verts, tris, runs, ids;
+     static std::vector<GxTriangle> m;
+@@ -2598,11 +2701,13 @@ void exec(uint8_t cmd, const uint32_t *p, int np) {
+                this line existed. */
+             g.strip_raw.clear();
+             g.strip_parity = 0;
++            g_rec.strip.clear();   /* a lean frame's strip (struct Rec) */
+             break;
+         case 0x41:                                               // END_VTXS
+             g.prim = -1;
+             g.strip.clear();
+             g.strip_raw.clear();
++            g_rec.strip.clear();
+             break;
+         case 0x50:                                               // SWAP_BUFFERS
+             /* rung R3b/BSWAP: latch, do not act. See THE PENDING SWAP above. */
+@@ -3651,6 +3756,8 @@ void gx_matrix_stack_levels(unsigned &pos_level, unsigned &proj_level) {
+ }
+ 
+ size_t gx_polygon_count() {
++    if (g_rec.lean && g_rec.on && !g_rec.listed)   // a lean frame: the record's
++        return g_rec.idx.size() / 3 + (size_t)g.grid_subtris;
+     return g.tris.size() + (size_t)g.grid_subtris;
+ }
+ 
+@@ -3667,10 +3774,30 @@ int gx_step5_counts(unsigned sum[4], unsigned max[4]) {
+ 
+ const GxTriangle *gx_polygons(size_t &count) {
+     grids_materialize_w(2);     // a caller that reads the list gets the triangles
++    if (g_rec.lean && g_rec.on && !g_rec.listed) {
++        /* a lean frame (struct Rec): a copy made from the record so far, so a
++           probe's before/after counts and ranges read what the list would */
++        rec_materialise(g_rec.view);
++        count = g_rec.view.size();
++        return g_rec.view.empty() ? nullptr : g_rec.view.data();
++    }
+     count = g.tris.size();
+     return g.tris.empty() ? nullptr : g.tris.data();
+ }
+ 
++void gx_record_configure(int lean) {
++    g_rec_lean_cfg = lean ? 1 : 0;
++}
++
++void gx_record_to_list() {
++    rec_lean_list();
++}
++
++void gx_record_size(size_t &verts, size_t &tris) {
++    verts = g_rec.on ? g_rec.v.size() : 0;
++    tris = g_rec.on ? g_rec.idx.size() / 3 : 0;
++}
++
+ const GxTriangle *gx_take_triangles(std::vector<GxTriangle> &into) {
+     const GxTriangle *had = g.tris.data();
+     into.swap(g.tris);
+@@ -5012,6 +5139,10 @@ void gx_card_settle_because(const char *why)
+     f.pre = g_aa_src;
+     f.out = &out;
+     f.sink3d = g_cp_sink;
++    /* the held frame's triangles (a lean frame's made now, struct Rec) */
++    rec_lean_list();
++    f.tris = g.tris.data();
++    f.count = g.tris.size();
+     void (*const done)(void) = g_cp_sink_done;
+     g_cp_sink = nullptr;
+     g_cp_sink_done = nullptr;
+@@ -5068,6 +5199,9 @@ const uint32_t *gx_card_capture_picture()
+     f.ph = g_cp_geo.ph;
+     f.aa_mode = g_aa_mode;
+     f.out = &out;
++    rec_lean_list();   /* the held frame's triangles, as the settle's */
++    f.tris = g.tris.data();
++    f.count = g.tris.size();
+     if (g_gpu_opaque(&f) != 1) { gx_card_settle(); return nullptr; }
+     return g_cp_scratch;
+ }
+@@ -6810,13 +6944,24 @@ void gx_render(Framebuffer &fb) {
+         if (have_shadow && have_translucent) break;
+     }
+     if (g.grid_translucent) have_translucent = true;
++    /* a lean frame's list is still empty (struct Rec): its runs say the same */
++    const bool lean = g_rec.lean && g_rec.on && !g_rec.listed;
++    size_t lean_mode2 = 0;
++    bool lean_fog = false;
++    if (lean)
++        for (const RecRun &r : g_rec.runs) {
++            if (r.st.mode == 3) have_shadow = true;
++            if (r.st.translucent) have_translucent = true;
++            if (r.st.mode == 2) ++lean_mode2;
++            if (r.st.fog) lean_fog = true;
++        }
+     /* THE TOON TABLE AND DISP3DCNT's SHADING BIT, read once for the frame and
+        only when a mode-2 polygon is in it (see gx_toon_table in ntr/gx.h). A
+        frame without one leaves g_toon_shade 0 and every band below takes the
+        plain modulation it always took. */
+     g_toon_shade = 0;
+     {
+-        size_t n2 = g.grid_mode2;
++        size_t n2 = g.grid_mode2 + lean_mode2;
+         for (const GxTriangle &t : g.tris)
+             if (t.mode == 2) ++n2;
+         if (n2) g_toon_shade = gx_toon_table(g_toon8);
+@@ -6869,7 +7014,7 @@ void gx_render(Framebuffer &fb) {
+     /* THE FRAME'S FOG: on when DISP3DCNT says so and something takes it */
+     g_have_fog = false;
+     if (gx_fog_state(&g_fog)) {
+-        g_have_fog = g_fog.rear_fog != 0;
++        g_have_fog = g_fog.rear_fog != 0 || lean_fog;
+         for (size_t i = 0; i < g.tris.size() && !g_have_fog; ++i)
+             g_have_fog = g.tris[i].fog != 0;
+     }
+@@ -6971,7 +7116,10 @@ void gx_render(Framebuffer &fb) {
+         }
+     }
+     /* a frame the card did not draw whole needs its triangles */
+-    if (!gpu_full) grids_materialize_w(4);
++    if (!gpu_full) {
++        rec_lean_list();
++        grids_materialize_w(4);
++    }
+     /* A frame the card did not keep goes on as an ordinary one: the CPU passes
+        draw into the clear colour, which the transparent fill did not leave */
+     if (g_cp_pending && !g_cp_active) clear_fill_classic(fb);
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index e4178d9a5..ae3329706 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -220,6 +220,17 @@ struct GxRecord {
+ // the frame was recorded whole, 0 when it was not (SM64DS_GXREC off, a frame
+ // the recorder does not take, or one it stopped on); `into` is then emptied.
+ int gx_take_record(GxRecord &into);
++// LEAN FRAMES (step 5.2b), for a card that draws every frame it keeps from
++// the record: 1 makes every recorded frame ONLY recorded (no projected
++// triangles), its polygon list made from the record wherever it is wanted
++// (gx_render for a frame the card does not take, the settle and capture,
++// gx_polygons, gx_record_to_list). 0 (the default) records beside the list.
++void gx_record_configure(int lean);
++// A lean frame's triangles into the list now (a card that cannot draw this
++// frame's record and will take the triangles instead); nothing otherwise.
++void gx_record_to_list();
++// The size of this frame's record so far (0, 0 when there is none).
++void gx_record_size(size_t &verts, size_t &tris);
+ 
+ // Feed the engine. `gx_write_port` takes a geometry-port address in
+ // 0x4000440..0x40005FF; `gx_write_fifo` takes a word pushed at 0x4000400.
+@@ -450,7 +461,9 @@ struct GxGpuFrame {
+     //         says so; 2 = write into `pre` the picture the display capture
+     //         reads (the frame before the smoothing under the overlay, no fade)
+     //         and leave fb alone. Both answer 1, or 0 when the card cannot
+-    //         (then the 3D of that one frame is the clear colour).
++    //         (then the 3D of that one frame is the clear colour). tris /
++    //         count are the held frame's triangles again (a lean frame,
++    //         gx_record_configure, has none until a settle makes them).
+     int keep;
+     int settle;
+     // slot    with settle 3 (run hunt8, lane GPUINTERP1): 1 the retained tick's
+-- 
+2.49.0
+

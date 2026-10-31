@@ -1,0 +1,83 @@
+From 7eaf11cadbf93a96d5af2fef1e222b25978eac6b Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 12:27:42 -0700
+Subject: [PATCH] ntr: engine B's BLDY fades reach the backdrop
+
+A pixel no layer drew was written as the raw backdrop colour, outside the
+colour-effect unit. The backdrop is a BLDCNT 1st target like any layer
+(bit 5), and the scene fades set it (0x2f / 0x3f), so on the DS the whole
+bottom screen fades together. The port faded the map while the backdrop
+around it (the castle grounds' green, the castle's beige) stayed full
+colour through every door, painting and level fade. backdrop_effect gives
+the backdrop the BLDY brightening or darkening inside the window's effect
+bit, in both scan_ref and scan_fast; alpha still never applies to it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/ppu_sub.cpp | 20 +++++++++++++++++---
+ 1 file changed, 17 insertions(+), 3 deletions(-)
+
+diff --git a/port/ntr/ppu_sub.cpp b/port/ntr/ppu_sub.cpp
+index abed9248f..8f119f61a 100644
+--- a/port/ntr/ppu_sub.cpp
++++ b/port/ntr/ppu_sub.cpp
+@@ -1073,6 +1073,17 @@ PPU_SUB_INLINE uint32_t blend_apply(const Blend &bl, unsigned mask, uint32_t top
+     return top;
+ }
+ 
++// A pixel no layer draws is the backdrop, and the backdrop is a 1st target
++// like any layer (BLDCNT bit 5): the BLDY modes brighten or darken it too.
++// Nothing lies under it, so alpha never applies. This is the colour inside
++// the window's bit 5; outside it the backdrop is untouched. The scene fades
++// set mask 0x2f or 0x3f, and without this the map faded to black or white
++// while the backdrop around it stayed full colour.
++inline uint32_t backdrop_effect(const Blend &bl, uint32_t backdrop) {
++    if (bl.off || (bl.mode != 2 && bl.mode != 3) || !(bl.first & 0x20)) return backdrop;
++    return blend_apply(bl, 0x20, backdrop, 5, false, backdrop, 5);
++}
++
+ // ---- the scan-out -------------------------------------------------------------
+ //
+ // scan_ref IS THE SCAN-OUT AS IT SHIPPED (0.5.1), kept whole as the reference the
+@@ -1112,6 +1123,7 @@ void scan_ref(SubFramebuffer &fb, uint32_t dispcnt, const uint8_t *skip,
+ 
+     const uint32_t backdrop = bgr555(rd16(kPlttBase));
+     const Blend bld = read_blend();
++    const uint32_t bd_fx = backdrop_effect(bld, backdrop);
+ 
+     for (int y = 0; y < SUB_H; ++y) {
+         for (int x = 0; x < SUB_W; ++x) {
+@@ -1140,10 +1152,11 @@ void scan_ref(SubFramebuffer &fb, uint32_t dispcnt, const uint8_t *skip,
+                     }
+                 }
+             }
+-            // Nothing drawn: the pixel is pure backdrop, no top layer to blend.
++            // Nothing drawn: the pixel is pure backdrop, no layer under it to
++            // blend, but the BLDY modes still reach it (backdrop_effect).
+             const uint32_t c = found ? blend_apply(bld, mask, col[0], id[0], semi,
+                                                    col[1], id[1])
+-                                     : backdrop;
++                                     : (mask & 0x20) ? bd_fx : backdrop;
+             fb.px[y][x] = apply_bright(c, br);
+         }
+     }
+@@ -1308,6 +1321,7 @@ void scan_fast(SubFramebuffer &fb, uint32_t dispcnt, const uint8_t *skip,
+     for (int i = 0; i < 256; ++i) pal32[i] = bgr555(rd16(kPlttBase + i * 2));
+     const uint32_t backdrop = pal32[0];
+     const Blend bld = read_blend();
++    const uint32_t bd_fx = backdrop_effect(bld, backdrop);
+ 
+     /* The enabled BGs in the reference's visit order (priority, then index),
+        flattened: flat[k] with its priority fprio[k]. */
+@@ -1364,7 +1378,7 @@ void scan_fast(SubFramebuffer &fb, uint32_t dispcnt, const uint8_t *skip,
+             }
+             const uint32_t c = found ? blend_apply(bld, mask, col[0], id[0], semi,
+                                                    col[1], id[1])
+-                                     : backdrop;
++                                     : (mask & 0x20) ? bd_fx : backdrop;
+             fb.px[y][x] = apply_bright(c, br);
+         }
+     }
+-- 
+2.55.0.windows.5
+

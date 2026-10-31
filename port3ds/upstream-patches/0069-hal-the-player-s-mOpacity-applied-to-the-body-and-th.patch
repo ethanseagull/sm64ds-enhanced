@@ -1,0 +1,50 @@
+From 75670bd9caa804f71c3fe67757483d62bad1faa7 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 13:16:29 -0700
+Subject: [PATCH] hal: the player's mOpacity applied to the body and the head
+
+The port's player render (hal_render_player_world) never called
+ModelBase::ApplyOpacity with mOpacity (+0x6f5) on the body or the head, as
+src/_ZN6Player6RenderEv.cpp:63 and :104 do every frame. St_Teleport_Main
+walks it 31 -> 1 -> 31 on the warp pads (BoB, CCM), so the player crossed a
+warp solid. Applied before the VS palette, the ROM's order.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/player_bridges.cpp | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/port/hal/player_bridges.cpp b/port/hal/player_bridges.cpp
+index af252b3b1..74acc59d2 100644
+--- a/port/hal/player_bridges.cpp
++++ b/port/hal/player_bridges.cpp
+@@ -1701,6 +1701,16 @@ void hal_render_player_world(void *player)
+        258 on every frame, which is the witness that the behaviour pass poses the
+        body by itself. A write watch on the neck bone showed it written twice a
+        frame with two different answers (out/HEAD3/bugs.md sections 1 and 2). */
++    /* THE PLAYER'S OWN OPACITY, src/_ZN6Player6RenderEv.cpp:63, first thing
++       on the body before the VS palette loop:
++
++           ModelBase::ApplyOpacity(bodyMdl, mOpacity, 0);
++
++       mOpacity (+0x6f5) is 31 in play and walks to 1 and back in
++       St_Teleport_Main (the warp pads: BoB, CCM, ...), and this copy never
++       applied it, so the player crossed a warp solid. The balloon arm below
++       and the head (hal_render_head_group's caller) apply it too. */
++    _ZN9ModelBase12ApplyOpacityEj(ma, *(const unsigned char *)(c + 0x6f5));
+     hal_player_vs_palette(c, (char *)ma);
+     /* see-through, last before the draw so the per-frame material rebuild
+        (UpdateVerts, the palette stamp) is already done and the alpha is what
+@@ -1771,6 +1781,9 @@ void hal_render_player_world(void *player)
+                         (const int *)(c + 0x80),
+                         (const int *)(c + 0x80),
+                         hid, (int)(hsink_t1 - hsink_t0));
++            /* the head's mOpacity, src/_ZN6Player6RenderEv.cpp:104 (the body's
++               note above) */
++            _ZN9ModelBase12ApplyOpacityEj(head, *(const unsigned char *)(c + 0x6f5));
+             hal_player_vs_palette(c, head);
+             if (ghost) ghost_opacity(head);
+             hal_render_head_group(c, head, hid, ma, scene);
+-- 
+2.55.0.windows.5
+

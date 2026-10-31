@@ -1,0 +1,102 @@
+From 12f8a5c6393a4b6ac68ba83787f79bba437c41b6 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 22:00:33 -0700
+Subject: [PATCH 05/13] port/hal: ARM arms for the x86 naked trampolines (3DS
+ port)
+
+cxx_aliases.cpp, fdr_arm9_fader_seat.cpp, scene_boot.cpp: on SM64DS_HOST_3DS the
+cdecl/thiscall discriminators are a plain tail branch and the ov100 r0
+ride-through is the ROM's own guard plus branch.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/cxx_aliases.cpp         | 12 ++++++++++++
+ port/hal/fdr_arm9_fader_seat.cpp |  8 ++++++++
+ port/hal/scene_boot.cpp          |  8 ++++++++
+ 3 files changed, 28 insertions(+)
+
+diff --git a/port/hal/cxx_aliases.cpp b/port/hal/cxx_aliases.cpp
+index 4f6d2c7ea..9538dc9d7 100644
+--- a/port/hal/cxx_aliases.cpp
++++ b/port/hal/cxx_aliases.cpp
+@@ -1983,6 +1983,17 @@ extern "C" {
+    test here is that same guard, not a new one. port/CMakeLists.txt renames the
+    symbol for the one TU that makes this call, so nothing else is re-routed. */
+ void func_ov100_02146280(char *c);
++#if defined(SM64DS_HOST_3DS)
++/* ARM: the actor is still in r0 from dActor_c::FindWithID, exactly where the
++   ROM's own call leaves it, so the thunk is the caller's guard and a tail
++   branch with r0 untouched. */
++__attribute__((naked)) void hal_ov100_02146280_ridethrough(void)
++{
++    __asm__ volatile("cmp r0, #0\n"
++                     "bxeq lr\n"
++                     "b func_ov100_02146280\n");
++}
++#else
+ __declspec(naked) void hal_ov100_02146280_ridethrough(void)
+ {
+     __asm {
+@@ -1995,6 +2006,7 @@ __declspec(naked) void hal_ov100_02146280_ridethrough(void)
+         ret
+     }
+ }
++#endif
+ }
+ /* One TU spells ActorBase::MarkForDestruction by an ad-hoc C name rather than
+    the Itanium one -- the same body either way. */
+diff --git a/port/hal/fdr_arm9_fader_seat.cpp b/port/hal/fdr_arm9_fader_seat.cpp
+index c099a8aa5..0e2c28ed2 100644
+--- a/port/hal/fdr_arm9_fader_seat.cpp
++++ b/port/hal/fdr_arm9_fader_seat.cpp
+@@ -782,6 +782,13 @@ extern "C" int __cdecl port_fdr_s10_body(void *s, int frames, int)
+ 
+ namespace {
+ 
++#if defined(SM64DS_HOST_3DS)
++/* ARM: both caller shapes put the receiver in r0 and the two words in r1/r2,
++   which is already the body's own frame -- the x86 trampolines below exist
++   only to tell MSVC's __cdecl and __thiscall callers apart. */
++__attribute__((naked)) void fdr_s0c(void) { __asm__ volatile("b port_fdr_s0c_body\n"); }
++__attribute__((naked)) void fdr_s10(void) { __asm__ volatile("b port_fdr_s10_body\n"); }
++#else
+ __declspec(naked) void fdr_s0c(void)
+ {
+     __asm {
+@@ -816,6 +823,7 @@ __declspec(naked) void fdr_s10(void)
+         jmp  port_fdr_s10_body
+     }
+ }
++#endif
+ int __fastcall fdr_s28(void *, void *)
+ { fdr_trap("overhang slot 0x28", "nothing, this slot is not the ROM's"); return 0; }
+ int __fastcall fdr_s2c(void *, void *)
+diff --git a/port/hal/scene_boot.cpp b/port/hal/scene_boot.cpp
+index 0fb1e0ac0..c1302a34c 100644
+--- a/port/hal/scene_boot.cpp
++++ b/port/hal/scene_boot.cpp
+@@ -2023,6 +2023,13 @@ extern "C" int __cdecl l2_eb2c_s10_body(void *s, int frames, int)
+     l2_eb2c_note(4); return l2_eb2c_run_setter(s, (unsigned)frames, 0);
+ }
+ 
++#if defined(SM64DS_HOST_3DS)
++/* ARM: both caller shapes put the receiver in r0 and the two words in r1/r2,
++   which is already the body's own frame -- the x86 trampolines below exist
++   only to tell MSVC's __cdecl and __thiscall callers apart. */
++__attribute__((naked)) static void l2_eb2c_s0c(void) { __asm__ volatile("b l2_eb2c_s0c_body\n"); }
++__attribute__((naked)) static void l2_eb2c_s10(void) { __asm__ volatile("b l2_eb2c_s10_body\n"); }
++#else
+ __declspec(naked) static void l2_eb2c_s0c(void)
+ {
+     __asm {
+@@ -2062,6 +2069,7 @@ __declspec(naked) static void l2_eb2c_s10(void)
+         jmp  l2_eb2c_s10_body
+     }
+ }
++#endif
+ 
+ /* +0x14, +0x18 and +0x1c. The three predicates, through the flat faces two
+    other hal files already own. +0x1c is the one that must NOT be a qualified
+-- 
+2.55.0.windows.5
+

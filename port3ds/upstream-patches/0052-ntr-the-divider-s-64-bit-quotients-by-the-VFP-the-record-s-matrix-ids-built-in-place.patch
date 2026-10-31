@@ -1,0 +1,82 @@
+From 051aa3552a8b73123ee16efb4ef29aa2fed1fc2d Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Tue, 20 Oct 2026 22:55:10 -0700
+Subject: [PATCH] ntr: the divider's 64-bit quotients by the VFP; the record's
+ matrix ids built in place
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp |  4 ++--
+ port/ntr/io.cpp | 27 +++++++++++++++++++++++++++
+ 2 files changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index cf2746029..848ed6ebe 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -1905,7 +1905,8 @@ inline void rec_vertex(int16_t x, int16_t y, int16_t z, bool new_id) {
+            the list's own flow it is asked inside this vertex's project() */
+         (void)menu_wide();
+         if (R.mtx.size() >= 0x7FFF) { rec_stop(REC_IDS); return; }
+-        RecMtx m;
++        R.mtx.emplace_back();   // in place: the skinned title face makes ~490 a frame
++        RecMtx &m = R.mtx.back();
+         m.pos = g.pos;
+         m.proj = g.proj;
+         m.vp[0] = g.vp_x; m.vp[1] = g.vp_y; m.vp[2] = g.vp_w; m.vp[3] = g.vp_h;
+@@ -1917,7 +1918,6 @@ inline void rec_vertex(int16_t x, int16_t y, int16_t z, bool new_id) {
+         m.first = (uint32_t)R.v.size();
+         m.cs[0] = m.cs[1] = m.cs[2] = 0.0f;
+         m.persp = (m.proj.m[3] != 0.0f || m.proj.m[7] != 0.0f || m.proj.m[11] != 0.0f) ? 1 : 0;
+-        R.mtx.push_back(m);
+     }
+     R.geom = 1;
+     if (R.v.size() >= 0xFFFF) { rec_stop(REC_IDS); return; }   // 16-bit indices
+diff --git a/port/ntr/io.cpp b/port/ntr/io.cpp
+index a058cdcdc..f7a35e89f 100644
+--- a/port/ntr/io.cpp
++++ b/port/ntr/io.cpp
+@@ -230,6 +230,32 @@ static int64_t div64_by_32_vfp(int64_t n, int64_t d, int64_t &rem) {
+     return q;
+ }
+ 
++/* The same for any n and d a double holds exactly (under 2^53 each way): the
++   title's skinned faces divide 64 by 64 (or 64 by 32 past a 32-bit quotient),
++   ~3% of an Azahar title frame through __udivmoddi4. rem = INT64_MIN: not
++   taken. The quotient is the double's, truncated, then corrected until the
++   remainder is C's (|r| < |d|, the sign of n), so it is exact. */
++static int64_t div64_vfp(int64_t n, int64_t d, int64_t &rem) {
++    constexpr int64_t kExact = int64_t(1) << 53;
++    if (n <= -kExact || n >= kExact || d <= -kExact || d >= kExact) {
++        rem = INT64_MIN;
++        return 0;
++    }
++    const double dq = static_cast<double>(n) / static_cast<double>(d);
++    int64_t q = static_cast<int64_t>(dq);   // |n / d| < 2^53: in range
++    int64_t r = n - q * d;
++    const int64_t ad = d < 0 ? -d : d, s = d < 0 ? -1 : 1;
++    if (n >= 0) {
++        while (r < 0) { q -= s; r += ad; }
++        while (r >= ad) { q += s; r -= ad; }
++    } else {
++        while (r > 0) { q += s; r -= ad; }
++        while (r <= -ad) { q -= s; r += ad; }
++    }
++    rem = r;
++    return q;
++}
++
+ void run_divide() {
+     if (div_unit_off()) return;
+     const uint16_t mode = static_cast<uint16_t>(raw_read(DIVCNT, 2)) & 3;
+@@ -266,6 +292,7 @@ void run_divide() {
+            double divide and an exact remainder correction: the same quotient
+            and remainder as below, without a 64-bit library divide (~10% of
+            an Azahar file-select frame through __udivmoddi4). */
++    } else if (!(n == INT64_MIN && d == -1) && (quot = div64_vfp(n, d, rem), rem != INT64_MIN)) {
+     } else {
+         quot = n / d;
+         rem = n - quot * d;
+-- 
+2.55.0.windows.5
+

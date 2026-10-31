@@ -1,0 +1,379 @@
+From e94795ece5121e191d8c2de469437fe65a510f67 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 14:32:55 -0700
+Subject: [PATCH] ntr: engine B showing a capture can be shown from the card's
+ copy of it
+
+Captures are numbered and the publish says where it carried each (ppu_capture_shown); ppu_sub_bitmap_view says when engine B's whole picture is a 1:1 bitmap window; a publish's copy of a capture still being written waits for the next publish or a scan (ppu_vram_settle), and the fence waits for a capture by number.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp            |  13 +++--
+ port/ntr/include/ntr/gx.h  |  14 ++++--
+ port/ntr/include/ntr/ppu.h |  17 +++++++
+ port/ntr/ppu.cpp           |  77 +++++++++++++++++++++++++---
+ port/ntr/ppu_sub.cpp       | 100 +++++++++++++++++++++++++++++++++++++
+ 5 files changed, 205 insertions(+), 16 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 9b4b819bf..b95f44f02 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -5971,7 +5971,7 @@ struct CapDefer {
+     int x, y, w, h;
+ } g_cap_defer;
+ int g_cap_deferred;   // this frame's capture was taken by the card
+-void (*g_cap_fence)();
++int (*g_cap_fence)(unsigned seq, int wait);
+ 
+ void cap_undefer() {
+     if (!g_cap_deferred) return;
+@@ -6276,7 +6276,7 @@ const uint32_t *gx_card_capture_picture()
+     return g_cp_scratch;
+ }
+ 
+-int gx_card_capture_defer(uint16_t *dst, int x, int y, int w, int h) {
++int gx_card_capture_defer(uint16_t *dst, int x, int y, int w, int h, unsigned seq) {
+     if (!g_cp_active || !g_cp_fb || !g_gpu_opaque || g_cap_deferred) return 0;
+     if (!(g_rec.lean && g_rec.on && !g_rec.listed)) return 0;   /* the record draws it */
+     GxGpuOut out;
+@@ -6290,6 +6290,7 @@ int gx_card_capture_defer(uint16_t *dst, int x, int y, int w, int h) {
+     f.cap_y = y;
+     f.cap_w = w;
+     f.cap_h = h;
++    f.cap_seq = seq;
+     f.outside_argb = kOldClear;
+     f.fb = &g_cp_fb->px[0][0];
+     f.stride = SCREEN_W;
+@@ -6307,11 +6308,13 @@ int gx_card_capture_defer(uint16_t *dst, int x, int y, int w, int h) {
+     return 1;
+ }
+ 
+-void gx_card_capture_fence() {
+-    if (g_cap_fence) g_cap_fence();
++void gx_card_capture_fence(unsigned seq) {
++    if (g_cap_fence) g_cap_fence(seq, 1);
+ }
+ 
+-void gx_set_capture_fence(void (*fence)()) { g_cap_fence = fence; }
++int gx_card_capture_written(unsigned seq) { return g_cap_fence ? g_cap_fence(seq, 0) : 1; }
++
++void gx_set_capture_fence(int (*fence)(unsigned seq, int wait)) { g_cap_fence = fence; }
+ 
+ namespace {
+ 
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index 35ecf21c8..71039da69 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -538,7 +538,7 @@ struct GxGpuFrame {
+     //         capture itself, later, when it presents this frame: the picture
+     //         settle 2 would make, cap_w x cap_h from (cap_x, cap_y), as BGR555
+     //         with bit 15 set into cap_dst (cap_w a row), done before the fence
+-    //         (gx_set_capture_fence) returns. Answer 1 to take it. -1 = a
++    //         (gx_set_capture_fence) for cap_seq returns. Answer 1 to take it. -1 = a
+     //         taken one is withdrawn (the frame is being settled after all and
+     //         is captured now).
+     int keep;
+@@ -547,6 +547,7 @@ struct GxGpuFrame {
+     int defer;
+     uint16_t *cap_dst;
+     int cap_x, cap_y, cap_w, cap_h;
++    unsigned cap_seq;   // the capture's number (ppu_capture_shown)
+     // slot    with settle 3 (run hunt8, lane GPUINTERP1): 1 the retained tick's
+     //         composite, 2 the retained picture between two ticks
+     int slot;
+@@ -705,10 +706,13 @@ const uint32_t *gx_card_capture_picture();
+ // (w x h from (x, y) of the picture, BGR555 into dst) as it presents the
+ // frame (GxGpuFrame::defer), 0 when the caller must capture now. Whatever
+ // reads or writes a captured block first calls gx_card_capture_fence, which
+-// returns once a deferred capture is written.
+-int gx_card_capture_defer(uint16_t *dst, int x, int y, int w, int h);
+-void gx_card_capture_fence();
+-void gx_set_capture_fence(void (*fence)());
++// returns once capture `seq` (0: every one the card took) is written;
++// gx_card_capture_written says whether it is, without waiting. The card's
++// fence(seq, wait) answers both (1: written).
++int gx_card_capture_defer(uint16_t *dst, int x, int y, int w, int h, unsigned seq);
++void gx_card_capture_fence(unsigned seq = 0);
++int gx_card_capture_written(unsigned seq);
++void gx_set_capture_fence(int (*fence)(unsigned seq, int wait));
+ 
+ // ---- A HELD TICK UNDER SMOOTHMOTION (run hunt8, lane CARDSM1) ----------------
+ // With the SmoothMotion key on, the pictures between two ticks are drawn from
+diff --git a/port/ntr/include/ntr/ppu.h b/port/ntr/include/ntr/ppu.h
+index 74aa76d0c..881f86bfb 100644
+--- a/port/ntr/include/ntr/ppu.h
++++ b/port/ntr/include/ntr/ppu.h
+@@ -352,6 +352,23 @@ void ppu_capture_counters(unsigned long long &performed,
+ // VBlank, the capture happens during the frame, and the scan-out reads what the
+ // mapping made visible.
+ void ppu_vram_publish(void);
++// 1 when this frame's ppu_vram_publish carried capture *seq to exactly
++// [addr, addr + len) (captures are numbered as they are made; the card keeps
++// the pictures of the ones it made, so engine B showing one can be shown from
++// that picture instead of scanned back out of VRAM). Valid until the next
++// publish.
++int ppu_capture_shown(uint32_t addr, uint32_t len, unsigned *seq);
++// A publish carries a capture the card is still writing (gx_card_capture_defer)
++// to engine B's VRAM later: when it is written, at the next publish, or here,
++// which whatever reads engine B's VRAM before then calls first (the scan-out
++// does). Waits for the captures it carries.
++void ppu_vram_settle(void);
++// 1 when engine B's whole picture, as ppu_scanout_sub would draw it now, is
++// a 256x192 window of 16-bit bitmap pixels at *addr, each shown 1:1 as it is
++// (a lone unrotated bitmap BG, or bitmap sprites tiling the screen above
++// anything else), with no colour effect, window or brightness, provided every
++// pixel there is opaque.
++int ppu_sub_bitmap_view(uint32_t *addr);
+ 
+ // Blit the bottom screen into a dst_w x dst_h ARGB buffer at (x0, y0), with a
+ // one-pixel frame around it.
+diff --git a/port/ntr/ppu.cpp b/port/ntr/ppu.cpp
+index b30fd82ea..8b677e716 100644
+--- a/port/ntr/ppu.cpp
++++ b/port/ntr/ppu.cpp
+@@ -647,8 +647,19 @@ constexpr uint32_t kBankSize = 0x20000u;     // 128 KB, banks A..D
+ struct CapRegion {
+     uint32_t off;    // bytes from the start of the bank
+     uint32_t len;    // bytes written
++    unsigned seq;    // which capture (g_cap_seq_n) it was
+ };
+ CapRegion g_cap[4];
++unsigned g_cap_seq_n;   // captures numbered as they are made, from 1
++
++// Where this frame's publish carried a capture: [addr, addr + len) is a copy of
++// capture `seq` since that copy, nothing having run between (ppu_capture_shown).
++struct CapShown {
++    uint32_t addr, len;
++    unsigned seq;
++};
++CapShown g_shown[4];
++
+ 
+ // The home each captured block was last seen at, so a change can be noticed.
+ // 0 is "not established yet" and the first publish pass only records.
+@@ -667,6 +678,38 @@ inline uint32_t lcdc_addr(unsigned block) {
+     return kLcdcBase + (uint32_t)block * kBankSize;
+ }
+ 
++// A publish's copy of a capture the card has not written yet, into engine B's
++// VRAM: done by ppu_vram_settle, once capture `seq` is written. Engine B
++// showing that capture is shown from the card's own picture of it
++// (ppu_capture_shown), so in a dual-screen minigame nothing reads the copy
++// until the next publish, and the tick does not wait for the card.
++struct CapCopy {
++    uint32_t dst, src, len;
++    unsigned seq;
++};
++CapCopy g_copy[4];
++int g_ncopy;
++
++void copy_settle(int block) {   // block < 0: every one; else those reading it
++    int n = 0;
++    for (int i = 0; i < g_ncopy; ++i) {
++        const CapCopy &c = g_copy[i];
++        if (block >= 0 && (c.src < lcdc_addr((unsigned)block) ||
++                           c.src >= lcdc_addr((unsigned)block) + kBankSize)) {
++            g_copy[n++] = c;
++            continue;
++        }
++        gx_card_capture_fence(c.seq);
++        std::memcpy(reinterpret_cast<void *>(c.dst), reinterpret_cast<const void *>(c.src), c.len);
++    }
++    g_ncopy = n;
++}
++
++// engine B's BG and OBJ windows, the homes a copy may wait in
++bool engine_b_home(uint32_t a) {
++    return (a >= 0x06200000u && a < 0x06220000u) || (a >= 0x06600000u && a < 0x06620000u);
++}
++
+ /* WHERE A BANK IS VISIBLE RIGHT NOW, per GBATEK's VRAM control table, for the
+    two banks the capture path uses and the two MSTs it uses them in. Returns 0
+    for "nowhere a reader in this program looks", which covers a disabled bank,
+@@ -742,7 +785,8 @@ void capture_forget(void) {
+ void ppu_vram_publish(void) {
+     /* a capture the card is still writing (gx_card_capture_defer) lands first:
+        this is what carries a captured block to where the program reads it */
+-    gx_card_capture_fence();
++    copy_settle(-1);   // the last publish's copies first, in their order
++    for (CapShown &v : g_shown) v.len = 0;   // only what this publish carries
+ 
+     /* A SCENE BOOT (see 2 above): drop what the last scene captured. Read
+        before anything else because this is the frame the new scene's banks are
+@@ -787,9 +831,15 @@ void ppu_vram_publish(void) {
+             std::memcpy(g_bank_i, reinterpret_cast<const void *>(kObjWindow), kBankIBytes);
+             g_bank_i_have = 1;
+         }
+-        std::memcpy(reinterpret_cast<void *>(home + g_cap[b].off),
+-                    reinterpret_cast<const void *>(lcdc_addr(b) + g_cap[b].off),
+-                    g_cap[b].len);
++        const uint32_t to = home + g_cap[b].off, from = lcdc_addr(b) + g_cap[b].off;
++        if (!gx_card_capture_written(g_cap[b].seq) && engine_b_home(to) && g_ncopy < 4) {
++            g_copy[g_ncopy++] = {to, from, g_cap[b].len, g_cap[b].seq};
++        } else {
++            gx_card_capture_fence(g_cap[b].seq);
++            std::memcpy(reinterpret_cast<void *>(to), reinterpret_cast<const void *>(from),
++                        g_cap[b].len);
++        }
++        g_shown[b] = {to, g_cap[b].len, g_cap[b].seq};
+     }
+ }
+ 
+@@ -838,8 +888,20 @@ void ppu_capture_counters(unsigned long long &performed,
+     from_preimage = g_cap_from_preimage;
+ }
+ 
++void ppu_vram_settle(void) {
++    if (g_ncopy) copy_settle(-1);
++}
++
++int ppu_capture_shown(uint32_t addr, uint32_t len, unsigned *seq) {
++    for (const CapShown &v : g_shown)
++        if (v.len && v.addr == addr && v.len == len) {
++            *seq = v.seq;
++            return 1;
++        }
++    return 0;
++}
++
+ void ppu_display_capture(const uint32_t *src, int w, int h) {
+-    gx_card_capture_fence();   /* the last one written before this one starts */
+     volatile uint32_t *reg = reinterpret_cast<volatile uint32_t *>(kDispCapCnt);
+     const uint32_t cap = *reg;
+     if (!(cap & 0x80000000u)) return;
+@@ -989,8 +1051,11 @@ void ppu_display_capture(const uint32_t *src, int w, int h) {
+        the same picture, made on the card and the present's thread instead of
+        here. One DS pixel a source pixel only, and not while hashing (the hash
+        is of the bytes as they are written). */
++    copy_settle((int)block);   /* a copy still to read this block, before it is written */
++    const unsigned seq = ++g_cap_seq_n;
++    g_cap[block].seq = seq;
+     if (!hash_on && rx == 1 && ry == 1 && cx0 + cw <= w && cy0 + ch <= h &&
+-        gx_card_capture_defer(dst, cx0, cy0, cw, ch)) {
++        gx_card_capture_defer(dst, cx0, cy0, cw, ch, seq)) {
+         if (gx_anti_aliasing()) ++g_cap_from_preimage;
+         ++g_cap_performed;
+         g_cap[block].off = off;
+diff --git a/port/ntr/ppu_sub.cpp b/port/ntr/ppu_sub.cpp
+index 379f4812b..b306a1004 100644
+--- a/port/ntr/ppu_sub.cpp
++++ b/port/ntr/ppu_sub.cpp
+@@ -2027,6 +2027,7 @@ void ppu_scanout_sub(SubFramebuffer &fb)
+     // just this one's -- engine A's live compositor is hal/message_compositor.cpp
+     // and this lane does not own that file. Inert unless SM64DS_PPU_AUDIT is set.
+     ppu_audit_sample("ppu_scanout_sub");
++    ppu_vram_settle();   // a capture's copy still waiting (ppu_vram_publish) lands first
+ 
+     /* THE HOST'S LAYER SUPPRESSION, applied at the ONE read of DISPCNT_B this
+        scan-out makes, so every layer decision below -- the BG rasters, the
+@@ -2051,6 +2052,105 @@ void ppu_scanout_sub(SubFramebuffer &fb)
+     if (twod_verify_on()) twod_verify_sub(fb, dispcnt, skip);
+ }
+ 
++/* THE DISPLAY CAPTURE ON ENGINE B (ntr/ppu.h). Asked before a scan-out: is
++   the picture it would draw just a 256x192 window of bitmap pixels, each 1:1?
++   Then a host that kept the picture those pixels were made from (the card's
++   capture, ppu_capture_shown) can show that instead. The same decisions as
++   ppu_scanout_sub, without a pixel read:
++     - the display on, no window, no colour effect, no master brightness;
++     - no sprites: one BG, a direct-colour bitmap, unrotated and unscaled,
++       256 dots wide and placed at x 0, so its 192 rows are consecutive;
++     - or bitmap sprites, 2D mapping 256 dots wide, unrotated and unflipped,
++       each wholly on screen, not overlapping, together covering the screen,
++       all reading one window (each sprite's pixel (x, y) at window + (y * 256
++       + x) * 2), at one priority with every other drawn sprite (all at
++       higher indices, so under them) and in front of every BG.
++   An opaque bitmap pixel shows as is; that every one is opaque is the
++   caller's to know (a capture's are). */
++int ppu_sub_bitmap_view(uint32_t *addr)
++{
++    const uint32_t dispcnt = reg32(kRegBase) & ~g_bg_suppress;
++    if (((dispcnt >> 16) & 3) != 1 || ((dispcnt >> 7) & 1) || (dispcnt & 0xE000u)) return 0;
++    if (read_blend().mode != 0) return 0;
++    {
++        const uint16_t mb = reg16(kRegBase + 0x6C);
++        const unsigned mode = (mb >> 14) & 3;
++        if ((mb & 0x1F) && (mode == 1 || mode == 2)) return 0;
++    }
++    const unsigned bgs_on = (dispcnt >> 8) & 0xFu;
++    if (!((dispcnt >> 12) & 1)) {
++        if (!bgs_on || (bgs_on & (bgs_on - 1u))) return 0;
++        BgLayer c;
++        read_bg(c, __builtin_ctz(bgs_on), dispcnt);
++        if (c.kind != BG_BITMAP_DIRECT || c.pa != 0x100 || c.pb != 0 || c.pc != 0 || c.pd != 0x100 ||
++            c.map_w != 256)
++            return 0;
++        const int px0 = c.refx >> 8, py0 = c.refy >> 8;
++        if (px0 != 0 || py0 < 0 || py0 + SUB_H > c.map_h) return 0;
++        *addr = c.screen + (uint32_t)py0 * 512u;
++        return 1;
++    }
++    if (((dispcnt >> 6) & 1) || !((dispcnt >> 5) & 1)) return 0;   /* 2D, 256 wide */
++    static const int kSizes[3][4][2] = {
++        {{8, 8}, {16, 16}, {32, 32}, {64, 64}},
++        {{16, 8}, {32, 8}, {32, 16}, {64, 32}},
++        {{8, 16}, {8, 32}, {16, 32}, {32, 64}},
++    };
++    uint8_t skip[128];
++    obj_decide(dispcnt, skip);
++    const uint32_t oam_b = g_oam_src_b ? g_oam_src_b : kOamBase;
++    struct Box { int x, y, w, h; } box[128];
++    int nbox = 0, prio = -1, last_bmp = -1, first_other = 128;
++    uint32_t window = 0;
++    unsigned area = 0;
++    for (int i = 0; i < 128; ++i) {
++        if (skip[i]) continue;
++        const uint16_t a0 = rd16(oam_b + i * 8u), a1 = rd16(oam_b + i * 8u + 2),
++                       a2 = rd16(oam_b + i * 8u + 4);
++        const bool affine = a0 & 0x100;
++        if (!affine && (a0 & 0x200)) continue;                          /* disabled */
++        const int shape = (a0 >> 14) & 3;
++        if (shape == 3) continue;
++        const unsigned mode = (a0 >> 10) & 3;
++        if (mode == 2) continue;                                        /* a window: none on */
++        if (mode == 3 && !((a2 >> 12) & 0xF)) continue;                 /* alpha 0 */
++        const int p = (a2 >> 10) & 3;
++        if (prio >= 0 && p != prio) return 0;
++        prio = p;
++        if (mode != 3) {
++            if (i < first_other) first_other = i;
++            continue;
++        }
++        if (affine || (a1 & 0x3000)) return 0;                          /* rotated, flipped */
++        last_bmp = i;
++        const int w = kSizes[shape][(a1 >> 14) & 3][0], h = kSizes[shape][(a1 >> 14) & 3][1];
++        int x = a1 & 0x1FF, y = a0 & 0xFF;
++        if (x >= 256) x -= 512;
++        if (y >= 192 && y >= 256 - h) y -= 256;
++        if (x < 0 || y < 0 || x + w > SUB_W || y + h > SUB_H) return 0;
++        const uint32_t tile = a2 & 0x3FF;
++        const uint32_t base = (tile & 0x1Fu) * 0x10u + (tile & ~0x1Fu) * 0x80u;
++        const uint32_t win = kObjVram + base - ((uint32_t)y * 256u + (uint32_t)x) * 2u;
++        if (nbox && win != window) return 0;
++        window = win;
++        for (int k = 0; k < nbox; ++k)
++            if (x < box[k].x + box[k].w && box[k].x < x + w && y < box[k].y + box[k].h &&
++                box[k].y < y + h)
++                return 0;
++        box[nbox++] = {x, y, w, h};
++        area += (unsigned)(w * h);
++    }
++    if (!nbox || area != (unsigned)(SUB_W * SUB_H) || first_other < last_bmp) return 0;
++    for (int i = 0; i < 4; ++i) {
++        if (!((bgs_on >> i) & 1)) continue;
++        BgLayer c;
++        read_bg(c, i, dispcnt);
++        if (c.kind != BG_OFF && c.prio < prio) return 0;               /* a BG in front */
++    }
++    *addr = window;
++    return 1;
++}
++
+ bool ppu_write_bmp_sub(const char *path, const SubFramebuffer &fb)
+ {
+     std::FILE *f = std::fopen(path, "wb");
+-- 
+2.55.0.windows.5
+

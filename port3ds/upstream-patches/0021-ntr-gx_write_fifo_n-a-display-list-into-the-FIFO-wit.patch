@@ -1,0 +1,101 @@
+From 66f9f03066e770939447eccc7ce9d6ec196e9130 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 04:53:52 -0700
+Subject: [PATCH] ntr: gx_write_fifo_n, a display list into the FIFO without a
+ call per word
+
+runtime.cpp's GXFIFO copies (Copy36Bytes, Copy48BytesFixed, the DMA copy)
+hand the whole run to gx.cpp; a command whose parameters all sit in the run
+executes straight off it. Same commands, same order, same stream hash.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp           | 35 +++++++++++++++++++++++++++++++++++
+ port/ntr/include/ntr/gx.h |  2 ++
+ port/ntr/runtime.cpp      |  4 ++--
+ 3 files changed, 39 insertions(+), 2 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 384dc7126..7ae0d7059 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -2849,6 +2849,41 @@ void gx_pltt_base(uint32_t v) {
+ // it". Reset returns the previous value.
+ static uint32_t g_stream_hash = 2166136261u;
+ void gx_stream_note(uint32_t w) { g_stream_hash = (g_stream_hash ^ w) * 16777619u; }
++
++// A run of words pushed at 0x4000400 (a display list copied or DMA'd to the
++// FIFO, runtime.cpp): gx_write_fifo word by word without a call per word, and
++// a command whose parameters all sit in the run executes straight off it
++// instead of through g_params. The same commands, the same order.
++void gx_write_fifo_n(const uint32_t *src, int n)
++{
++    if (n <= 0) return;
++    g_fifo_n += (uint32_t)n;
++    uint32_t h = g_stream_hash;
++    for (int i = 0; i < n; ++i) h = (h ^ src[i]) * 16777619u;
++    g_stream_hash = h;
++    const uint8_t *const pc = g_param_counts.n;
++    int i = 0;
++    while (i < n) {
++        if (g_queued != 0 && g_have == 0) {
++            // the command at g_qpos takes parameters (feed runs the
++            // parameterless ones as soon as they come up)
++            const uint8_t cmd = g_queue[g_qpos];
++            const int np = pc[cmd];
++            if (n - i >= np) {
++                exec(cmd, src + i, np);
++                i += np;
++                ++g_qpos;
++                while (g_qpos < g_queued && pc[g_queue[g_qpos]] == 0) {
++                    exec(g_queue[g_qpos], nullptr, 0);
++                    ++g_qpos;
++                }
++                if (g_qpos >= g_queued) g_queued = 0;
++                continue;
++            }
++        }
++        feed(src[i++]);
++    }
++}
+ uint32_t gx_stream_hash_reset()
+ {
+     const uint32_t h = g_stream_hash;
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index 2f77ee029..9ff6ce816 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -180,6 +180,8 @@ struct GxGrid {
+ // 0x4000440..0x40005FF; `gx_write_fifo` takes a word pushed at 0x4000400.
+ void gx_write_port(uint32_t addr, uint32_t value);
+ void gx_write_fifo(uint32_t word);
++// The same for n words in a row (a display list sent to the FIFO).
++void gx_write_fifo_n(const uint32_t *src, int n);
+ 
+ // Reset the command stream, matrix stacks and polygon list.
+ void gx_reset();
+diff --git a/port/ntr/runtime.cpp b/port/ntr/runtime.cpp
+index 426c3ce73..4232edebb 100644
+--- a/port/ntr/runtime.cpp
++++ b/port/ntr/runtime.cpp
+@@ -109,7 +109,7 @@ void copy_words(const uint32_t *src, uint32_t *dst, int n) {
+     if (reinterpret_cast<uintptr_t>(dst) == GXFIFO) {
+         /* run interp1: the display list's own address keys its draw group */
+         ntr::gx_dma_source(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(src)));
+-        for (int i = 0; i < n; ++i) ntr::gx_write_fifo(src[i]);
++        ntr::gx_write_fifo_n(src, n);
+         ntr::gx_dma_source(0);
+     } else {
+         for (int i = 0; i < n; ++i) dst[i] = src[i];
+@@ -133,7 +133,7 @@ extern "C" void Copy36Bytes(int *src, int *dst) {
+ // PORT_HOST_ABI: ARM asm primitive AND the GXFIFO-address seam (0x04000400).
+ extern "C" void Copy48BytesFixed(int *src, int *dst) {
+     if (reinterpret_cast<uintptr_t>(dst) == 0x04000400u) {
+-        for (int i = 0; i < 12; ++i) ntr::gx_write_fifo(static_cast<uint32_t>(src[i]));
++        ntr::gx_write_fifo_n(reinterpret_cast<const uint32_t *>(src), 12);
+     } else {
+         for (int i = 0; i < 12; ++i) dst[i] = src[i];
+     }
+-- 
+2.55.0.windows.5
+

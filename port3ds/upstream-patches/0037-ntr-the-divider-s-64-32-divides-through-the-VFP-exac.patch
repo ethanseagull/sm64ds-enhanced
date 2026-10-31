@@ -1,0 +1,74 @@
+From 7a1437a785139e3e06d15682ef0b0a29972e73ee Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 05:10:01 -0700
+Subject: [PATCH] ntr: the divider's 64/32 divides through the VFP, exact
+
+run_divide's 64/32 case (the game's fixed-point (a << 12) / b) divides the
+double of the numerator, truncates and corrects by the exact remainder,
+instead of a 64-bit library divide (__udivmoddi4: ~10% of an Azahar
+file-select frame). Same quotient and remainder: checked against exact
+division over 3M cases, and the CPU path's screenshots are byte-identical
+on every suite.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/io.cpp | 36 ++++++++++++++++++++++++++++++++++++
+ 1 file changed, 36 insertions(+)
+
+diff --git a/port/ntr/io.cpp b/port/ntr/io.cpp
+index 6c9d6b69b..a058cdcdc 100644
+--- a/port/ntr/io.cpp
++++ b/port/ntr/io.cpp
+@@ -199,6 +199,37 @@ bool div_unit_off() {
+     return off != 0;
+ }
+ 
++/* n / d for a 32-bit d whose quotient fits in 32 bits, as C truncates it:
++   the double of n built from its two halves (32-bit conversions only: the
++   ARM11's VFP has no 64-bit integer conversion), one divide, the quotient
++   truncated, then corrected by the exact remainder until 0 <= r < |d| (n >= 0)
++   or -|d| < r <= 0 (n < 0). The double's quotient is within one of the true
++   one (|q| < 2^31 keeps its error under 2^-21), so the loops run at most
++   once; checked against exact division over 3M cases, edges included
++   (scratchpad div_check.py, 2026-10-18). Answers with rem = INT64_MIN when
++   the quotient may not fit (the caller divides the slow way). */
++static int64_t div64_by_32_vfp(int64_t n, int64_t d, int64_t &rem) {
++    const double dn = static_cast<double>(static_cast<int32_t>(n >> 32)) * 4294967296.0 +
++                      static_cast<double>(static_cast<uint32_t>(n));
++    const double dq = dn / static_cast<double>(static_cast<int32_t>(d));
++    if (!(dq > -2147483000.0 && dq < 2147483000.0)) {
++        rem = INT64_MIN;
++        return 0;
++    }
++    int64_t q = static_cast<int32_t>(dq);
++    int64_t r = n - q * d;
++    const int64_t ad = d < 0 ? -d : d, s = d < 0 ? -1 : 1;
++    if (n >= 0) {
++        while (r < 0) { q -= s; r += ad; }
++        while (r >= ad) { q += s; r -= ad; }
++    } else {
++        while (r > 0) { q += s; r -= ad; }
++        while (r <= -ad) { q -= s; r += ad; }
++    }
++    rem = r;
++    return q;
++}
++
+ void run_divide() {
+     if (div_unit_off()) return;
+     const uint16_t mode = static_cast<uint16_t>(raw_read(DIVCNT, 2)) & 3;
+@@ -230,6 +261,11 @@ void run_divide() {
+         const int32_t q32 = static_cast<int32_t>(n) / static_cast<int32_t>(d);
+         quot = q32;
+         rem = static_cast<int32_t>(n) - q32 * static_cast<int32_t>(d);
++    } else if (d == static_cast<int32_t>(d) && (quot = div64_by_32_vfp(n, d, rem), rem != INT64_MIN)) {
++        /* 64 / 32 (the game's fixed-point (a << 12) / b) through the VFP's
++           double divide and an exact remainder correction: the same quotient
++           and remainder as below, without a 64-bit library divide (~10% of
++           an Azahar file-select frame through __udivmoddi4). */
+     } else {
+         quot = n / d;
+         rem = n - quot * d;
+-- 
+2.55.0.windows.5
+

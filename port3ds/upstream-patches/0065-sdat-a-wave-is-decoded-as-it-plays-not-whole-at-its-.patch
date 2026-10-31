@@ -1,0 +1,296 @@
+From d1dba67bccdcb5dc9f9060e57721c8a99e4a8661 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 09:18:26 -0700
+Subject: [PATCH] sdat: a wave is decoded as it plays, not whole at its first
+ note
+
+decode_swav decoded a whole SWAV at its first note, inside the mix: on the
+3DS port under the lock the game's sound frame waits for (Azahar's Old 3DS
+mode held it 24-46 ms for the intro's first notes). Now the head is decoded
+then and the mixer asks for the rest as it reaches it (sd_wave_fill); a trim
+finishes the waves still playing. sd_waves_stats counts the decodes.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/sdat/mixer.cpp |   6 ++
+ port/hal/sdat/sdat.cpp  | 127 ++++++++++++++++++++++++++++------------
+ port/hal/sdat/sdat.h    |  16 ++++-
+ 3 files changed, 108 insertions(+), 41 deletions(-)
+
+diff --git a/port/hal/sdat/mixer.cpp b/port/hal/sdat/mixer.cpp
+index 1e45fc613..8538c942c 100644
+--- a/port/hal/sdat/mixer.cpp
++++ b/port/hal/sdat/mixer.cpp
+@@ -63,6 +63,7 @@ const sd_s32 AMPL_MIN = -723 * 128;     // -72.3 dB, in 1/128 of 0.1 dB
+ struct Channel {
+     int active;
+     const sd_s16 *pcm;
++    void *lazy;         // SdatWave::lazy: its samples are made as it plays
+     sd_u32 total, loopStart;
+     int loop;
+     int hold;           // PSG voice: steps its samples, no interpolation
+@@ -319,6 +320,7 @@ void sd_mix_start(int ch, const SdatWave *w, const SdatNote *n,
+     c.seq = s;
+     c.active = 1;
+     c.pcm = w->pcm;
++    c.lazy = w->lazy;
+     c.total = w->totalSamples;
+     c.loop = w->loop;
+     c.loopStart = w->loopStart;
+@@ -797,6 +799,10 @@ void sd_mix_render(sd_s16 *dst, int frames)
+ 
+             sd_s16 *o = dst + (done * 2);
+             sd_s32 *w = wide ? acc + (done * 2) : nullptr;
++            if (c.lazy) {   // the samples this piece reads (a loop's, all of them)
++                const double last = c.pos + c.step * (double)(n + 1) + 2.0;
++                sd_wave_fill(c.lazy, last >= (double)c.total ? c.total : (sd_u32)last);
++            }
+             for (int k = 0; k < n; k++, o += 2) {
+                 sd_u32 idx = (sd_u32)c.pos;
+                 if (idx >= c.total) {
+diff --git a/port/hal/sdat/sdat.cpp b/port/hal/sdat/sdat.cpp
+index 8e97da055..bf71934d5 100644
+--- a/port/hal/sdat/sdat.cpp
++++ b/port/hal/sdat/sdat.cpp
+@@ -36,6 +36,7 @@
+ #include <set>
+ #include <unordered_map>
+ #include <vector>
++#include <memory>
+ #include <string>
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+@@ -273,10 +274,25 @@ static const sd_s16 kAdpcmStepTab[89] = {
+ };
+ 
+ struct WaveCache {
+-    std::vector<sd_s16> pcm;
++    std::unique_ptr<sd_s16[]> pcm;   // n samples, made up to `done`
++    sd_u32 n = 0;
+     SdatWave w;
++    // the decode still to do (wave_fill)
++    const sd_u8 *src = nullptr;      // the SWAV's data, after its header
++    int fmt = 0;
++    sd_u32 done = 0;
++    sd_s32 pred = 0;                 // IMA-ADPCM's state at sample `done`
++    int index = 0;
+ };
+ static std::unordered_map<const void *, WaveCache> g_waves;
++static unsigned long g_wave_decodes, g_wave_samples;   // sd_waves_stats
++
++void sd_waves_stats(unsigned long *decodes, unsigned long *samples, int take)
++{
++    *decodes = g_wave_decodes;
++    *samples = g_wave_samples;
++    if (take) g_wave_decodes = g_wave_samples = 0;
++}
+ 
+ /* Drop every decoded wave. The cache is keyed by SWAV record ADDRESSES in the
+    game arena, and an address only names the same sample while the arena around
+@@ -291,16 +307,19 @@ void sd_waves_reset(void)
+ 
+ /* The channels hold raw pointers into the cache (sd_mix_start: c.pcm), so a
+    wave goes only when none plays it; one still sounding stays, and the next
+-   trim takes it. */
++   trim takes it. It is decoded to its end here, while the SWAR it reads is
++   still the one it started from (a trim comes with a scene's change). */
++static void wave_fill(WaveCache &wc, sd_u32 upto);
+ unsigned long sd_waves_trim(void)
+ {
+     unsigned long bytes = 0;
+     for (auto it = g_waves.begin(); it != g_waves.end();) {
+-        if (sd_mix_plays(it->second.pcm.data())) {
++        if (sd_mix_plays(it->second.pcm.get())) {
++            wave_fill(it->second, it->second.n);
+             ++it;
+             continue;
+         }
+-        bytes += (unsigned long)it->second.pcm.capacity() * sizeof(sd_s16);
++        bytes += (unsigned long)it->second.n * sizeof(sd_s16);
+         it = g_waves.erase(it);
+     }
+     return bytes;
+@@ -392,8 +411,52 @@ extern "C" void sdat_seat_rom_residency(void)
+             (void *)*(sd_u8 **)(root + 0x84));
+ }
+ 
+-// Decode one SWAV record (12-byte header + payload) into mono s16.
+-static const WaveCache *decode_swav(const sd_u8 *rec)
++// Make wc's samples up to `upto` (at most its n): the same arithmetic, in
++// order, as a decode of the whole wave at once.
++static void wave_fill(WaveCache &wc, sd_u32 upto)
++{
++    if (upto > wc.n) upto = wc.n;
++    if (wc.done >= upto) return;
++    sd_s16 *out = wc.pcm.get();
++    const sd_u8 *d = wc.src;
++    sd_u32 i = wc.done;
++    if (wc.fmt == 0) {                    // PCM8, signed
++        for (; i < upto; i++) out[i] = (sd_s16)((sd_s8)d[i] << 8);
++    } else if (wc.fmt == 1) {             // PCM16
++        for (; i < upto; i++) out[i] = (sd_s16)rd16(d + i * 2);
++    } else {                              // IMA-ADPCM
++        sd_s32 pred = wc.pred;
++        int index = wc.index;
++        for (; i < upto; i++) {
++            int code = (d[4 + (i >> 1)] >> ((i & 1) * 4)) & 0xf;
++            sd_s32 step = kAdpcmStepTab[index];
++            sd_s32 diff = step >> 3;
++            if (code & 1) diff += step >> 2;
++            if (code & 2) diff += step >> 1;
++            if (code & 4) diff += step;
++            pred += (code & 8) ? -diff : diff;
++            if (pred < -0x8000) pred = -0x8000;
++            if (pred > 0x7fff) pred = 0x7fff;
++            index += kAdpcmIndexTab[code & 7];
++            if (index < 0) index = 0;
++            if (index > 88) index = 88;
++            out[i] = (sd_s16)pred;
++        }
++        wc.pred = pred;
++        wc.index = index;
++    }
++    g_wave_samples += upto - wc.done;
++    wc.done = upto;
++}
++
++void sd_wave_fill(void *lazy, sd_u32 upto)
++{
++    wave_fill(*static_cast<WaveCache *>(lazy), upto);
++}
++
++// Decode one SWAV record (12-byte header + payload) into mono s16: its head
++// now, the rest as it plays (SdatWave::lazy).
++static WaveCache *decode_swav(const sd_u8 *rec)
+ {
+     auto it = g_waves.find(rec);
+     if (it != g_waves.end()) return &it->second;
+@@ -410,40 +473,21 @@ static const WaveCache *decode_swav(const sd_u8 *rec)
+     wc.w.sampleRate = rate ? rate : 32768;
+     wc.w.loop = loop;
+     wc.w.loopStart = 0;
++    wc.src = d;
++    wc.fmt = fmt;
+ 
+     if (fmt == 0) {                       // PCM8, signed
+-        wc.pcm.resize(bytes);
+-        for (sd_u32 i = 0; i < bytes; i++)
+-            wc.pcm[i] = (sd_s16)((sd_s8)d[i] << 8);
++        wc.n = bytes;
+         wc.w.loopStart = loopWords * 4;
+     } else if (fmt == 1) {                // PCM16
+-        sd_u32 n = bytes / 2;
+-        wc.pcm.resize(n);
+-        for (sd_u32 i = 0; i < n; i++)
+-            wc.pcm[i] = (sd_s16)rd16(d + i * 2);
++        wc.n = bytes / 2;
+         wc.w.loopStart = loopWords * 2;
+     } else if (fmt == 2) {                // IMA-ADPCM
+         if (bytes < 4) return 0;
+-        sd_s32 pred = (sd_s16)rd16(d);
+-        int index = d[2] & 0x7f;
+-        if (index > 88) index = 88;
+-        sd_u32 nib = (bytes - 4) * 2;
+-        wc.pcm.reserve(nib);
+-        for (sd_u32 i = 0; i < nib; i++) {
+-            int code = (d[4 + (i >> 1)] >> ((i & 1) * 4)) & 0xf;
+-            sd_s32 step = kAdpcmStepTab[index];
+-            sd_s32 diff = step >> 3;
+-            if (code & 1) diff += step >> 2;
+-            if (code & 2) diff += step >> 1;
+-            if (code & 4) diff += step;
+-            pred += (code & 8) ? -diff : diff;
+-            if (pred < -0x8000) pred = -0x8000;
+-            if (pred > 0x7fff) pred = 0x7fff;
+-            index += kAdpcmIndexTab[code & 7];
+-            if (index < 0) index = 0;
+-            if (index > 88) index = 88;
+-            wc.pcm.push_back((sd_s16)pred);
+-        }
++        wc.pred = (sd_s16)rd16(d);
++        wc.index = d[2] & 0x7f;
++        if (wc.index > 88) wc.index = 88;
++        wc.n = (bytes - 4) * 2;
+         // The 4-byte ADPCM header sits inside the "loop" word count, so the
+         // loop point is (loopWords*4 - 4) bytes of nibbles in.
+         wc.w.loopStart = loopWords >= 1 ? (loopWords * 4 - 4) * 2 : 0;
+@@ -452,12 +496,16 @@ static const WaveCache *decode_swav(const sd_u8 *rec)
+         if (!warned++) fprintf(stderr, "[sdat] unknown SWAV format %d\n", fmt);
+         return 0;
+     }
++    wc.pcm.reset(new sd_s16[wc.n ? wc.n : 1]);
+ 
+-    wc.w.totalSamples = (sd_u32)wc.pcm.size();
++    wc.w.totalSamples = wc.n;
+     if (wc.w.loopStart >= wc.w.totalSamples) wc.w.loopStart = 0;
++    ++g_wave_decodes;
+     auto res = g_waves.emplace(rec, std::move(wc));
+-    res.first->second.w.pcm = res.first->second.pcm.data();
+-    return &res.first->second;
++    WaveCache &e = res.first->second;
++    e.w.pcm = e.pcm.get();
++    wave_fill(e, 2048);   // the head; the mixer asks for the rest as it plays
++    return &e;
+ }
+ 
+ int sdat_swar_wave(const sd_u8 *swar, sd_u32 index, SdatWave *out)
+@@ -467,10 +515,11 @@ int sdat_swar_wave(const sd_u8 *swar, sd_u32 index, SdatWave *out)
+     if (index >= count) return 0;
+     sd_u32 off = rd32(swar + 0x3c + index * 4);
+     if (!off) return 0;
+-    const WaveCache *wc = decode_swav(swar + off);
+-    if (!wc || wc->pcm.empty()) return 0;
++    WaveCache *wc = decode_swav(swar + off);
++    if (!wc || !wc->n) return 0;
+     *out = wc->w;
+-    out->pcm = wc->pcm.data();
++    out->pcm = wc->pcm.get();
++    out->lazy = wc->done < wc->n ? wc : nullptr;
+     return 1;
+ }
+ 
+diff --git a/port/hal/sdat/sdat.h b/port/hal/sdat/sdat.h
+index 04854f6ef..a2a0e5576 100644
+--- a/port/hal/sdat/sdat.h
++++ b/port/hal/sdat/sdat.h
+@@ -78,16 +78,24 @@ int sdat_seq_priority(const sd_u8 *seqBase, sd_u32 startOff);
+ // ---- SWAV ---------------------------------------------------------------
+ 
+ // Every SWAV is decoded to mono s16 once and cached, keyed by its record
+-// address. PCM8/PCM16 are widened/copied, IMA-ADPCM is fully decoded, so the
+-// mixer never carries per-format state across a loop point.
++// address. PCM8/PCM16 are widened/copied, IMA-ADPCM is decoded, so the mixer
++// never carries per-format state across a loop point. THE DECODE FOLLOWS THE
++// PLAY: a wave's first play decodes its head, and the mixer asks for the rest
++// as it reaches it (sd_wave_fill), so no mix piece decodes a whole sample (on
++// the 3DS port, under the lock the game's sound frame waits for: Azahar's Old
++// 3DS mode held it 24-46 ms for the intro's first notes).
+ struct SdatWave {
+     const sd_s16 *pcm;
+     sd_u32 totalSamples;
+     int loop;
+     sd_u32 loopStart;       // in samples
+     sd_u32 sampleRate;
++    void *lazy = nullptr;   // a wave not yet decoded to its end: sd_wave_fill
+ };
+ 
++// Decode `lazy`'s wave (SdatWave::lazy) up to sample `upto`, if not yet.
++void sd_wave_fill(void *lazy, sd_u32 upto);
++
+ // Resolve wave `index` inside a resident SWAR image. Returns 1 on success.
+ int sdat_swar_wave(const sd_u8 *swar, sd_u32 index, SdatWave *out);
+ 
+@@ -96,6 +104,10 @@ int sdat_swar_wave(const sd_u8 *swar, sd_u32 index, SdatWave *out);
+ // port's Old 3DS (64 MB). Whoever mixes on another thread must hold its lock.
+ unsigned long sd_waves_trim(void);
+ 
++// The waves decoded and their samples since the last call (take: and reset):
++// a decode runs at a note's first play, inside the mix.
++void sd_waves_stats(unsigned long *decodes, unsigned long *samples, int take);
++
+ // ---- SBNK ---------------------------------------------------------------
+ 
+ struct SdatNote {
+-- 
+2.55.0.windows.5
+

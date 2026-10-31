@@ -1,0 +1,49 @@
+From f42d453e27029ba36f0141e124e16b1196a8b21b Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 20:06:15 -0700
+Subject: [PATCH] hal: the Game Over crossing takes scene 1 when the host asks
+ (port_level_quit_crosses)
+
+The pause and level-clear menus' quit rows then cross like the Game Over's
+QUIT row: the ROM marks the Stage after its fade, the crossing tears it down,
+runs the title and its file select, and the file picked boots into a new
+Stage through the apply. 0 (the default, the PC port): the front door's quit
+poll answers scene 1 as before. The 3DS sets 1.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/level_change.cpp | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/port/hal/level_change.cpp b/port/hal/level_change.cpp
+index d3982e38d..f9b5900a5 100644
+--- a/port/hal/level_change.cpp
++++ b/port/hal/level_change.cpp
+@@ -2463,13 +2463,23 @@ static int g_crossing_live;       /* the reap pump is running: slot 3 may run
+ extern "C" int port_level_crossing_live(void) { return g_crossing_live; }
+ extern "C" int port_level_crossed_scenes(void) { return g_crossed_scenes; }
+ 
++/* SCENE 1 TOO, when the host says so (port3ds/game/main_game.cpp: the 3DS
++   has no front-door relaunch worth keeping). The pause and level-clear
++   menus' quit rows then cross like the Game Over's QUIT row does: the ROM
++   marks the Stage after its fade, this crossing runs the title and its
++   file select, and the file picked boots through the apply. 0 (the PC
++   port): tests/walk_window.cpp's port_front_end_quit_poll answers it. */
++extern "C" int port_level_quit_crosses = 0;
++
+ static int port_scene_crossing_due(void)
+ {
+     if (data_02092110 >= 0)
+         return 0;                  /* a level change: the apply owns it */
+     const unsigned id = data_02092664;
+-    if (id == 0x187 || id == 1 || id == 3 || id == 4)
++    if (id == 0x187 || id == 3 || id == 4)
+         return 0;                  /* nothing, or a path above owns it */
++    if (id == 1 && !port_level_quit_crosses)
++        return 0;                  /* the front door's quit poll owns it */
+     void *st = port_stage_object();
+     if (!st)
+         return 0;
+-- 
+2.55.0.windows.5
+

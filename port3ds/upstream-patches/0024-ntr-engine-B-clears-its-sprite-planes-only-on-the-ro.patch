@@ -1,0 +1,108 @@
+From b75b82969c47830b59ad9ea3220f0968f81cd383 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 05:55:59 -0700
+Subject: [PATCH] ntr: engine B clears its sprite planes only on the rows it
+ wrote
+
+raster_obj cleared all of g_obj (192 x 256 x 8 bytes) and g_objwin every
+scan-out; the minimap's sprites cover a few rows. g_obj_rows /
+g_objwin_rows record the rows written since the last clear, which is all
+that is cleared (a buffer raster_obj has not cleared before is cleared
+whole), and a scan may skip the sprite read on a row with none. The text
+BG line sampler reads a tile's screen entry once per run of its pixels.
+Same pictures (SM64DS_TWOD_VERIFY=1 against scan_ref every frame).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/ppu_sub.cpp | 37 ++++++++++++++++++++++++++++++++++---
+ 1 file changed, 34 insertions(+), 3 deletions(-)
+
+diff --git a/port/ntr/ppu_sub.cpp b/port/ntr/ppu_sub.cpp
+index 846a603b4..abed9248f 100644
+--- a/port/ntr/ppu_sub.cpp
++++ b/port/ntr/ppu_sub.cpp
+@@ -443,6 +443,11 @@ ObjPixel g_obj[192][256];
+ // from g_obj because a mask pixel contributes no colour and has no priority.
+ uint8_t g_objwin[192][256];
+ 
++// The rows of g_obj / g_objwin raster_obj wrote since it last cleared them:
++// it clears only those (most of the bottom screen holds no sprite), and a
++// scan may skip the sprite read on a row whose flag is 0.
++uint8_t g_obj_rows[192], g_objwin_rows[192];
++
+ /* ---- THE FOUR MAP ARROWS, DECLINED AT THE PRESENTATION SEAM ----------------
+  *
+  * WHAT THE OWNER ASKED FOR: "Remove the left and right arrows from the minimap
+@@ -564,8 +569,26 @@ void raster_obj(uint32_t dispcnt, const uint8_t *skip, ObjPixel (*obj)[256],
+         {{16, 8}, {32, 8}, {32, 16}, {64, 32}},
+         {{8, 16}, {8, 32}, {16, 32}, {32, 64}},
+     };
+-    std::memset(obj, 0, sizeof(ObjPixel) * 192 * 256);
+-    std::memset(objwin, 0, 192 * 256);
++    /* Cleared as before, a row at a time where the last raster wrote (both
++       buffers are only ever written here; a buffer this has not cleared
++       before is cleared whole). */
++    static const void *s_obj, *s_win;
++    if (obj != s_obj) {
++        std::memset(obj, 0, sizeof(ObjPixel) * 192 * 256);
++        s_obj = obj;
++    } else {
++        for (int y = 0; y < 192; ++y)
++            if (g_obj_rows[y]) std::memset(obj[y], 0, sizeof(ObjPixel) * 256);
++    }
++    std::memset(g_obj_rows, 0, sizeof g_obj_rows);
++    if (objwin != s_win) {
++        std::memset(objwin, 0, 192 * 256);
++        s_win = objwin;
++    } else {
++        for (int y = 0; y < 192; ++y)
++            if (g_objwin_rows[y]) std::memset(objwin[y], 0, 256);
++    }
++    std::memset(g_objwin_rows, 0, sizeof g_objwin_rows);
+     if (!((dispcnt >> 12) & 1))
+         return;
+     const uint32_t boundary = 32u << ((dispcnt >> 20) & 3);
+@@ -779,6 +802,7 @@ void raster_obj(uint32_t dispcnt, const uint8_t *skip, ObjPixel (*obj)[256],
+                     obj[py][px].prio = prio;
+                     obj[py][px].hit = 1;
+                     obj[py][px].semi = 0;
++                    g_obj_rows[py] = 1;
+                     continue;
+                 }
+                 const uint32_t slot =
+@@ -807,6 +831,7 @@ void raster_obj(uint32_t dispcnt, const uint8_t *skip, ObjPixel (*obj)[256],
+                 // colour it would have had is discarded.
+                 if (is_win) {
+                     objwin[py][px] = 1;
++                    g_objwin_rows[py] = 1;
+                     continue;
+                 }
+                 // Priority resolves OBJ-vs-OBJ (see the header note): overwrite
+@@ -822,6 +847,7 @@ void raster_obj(uint32_t dispcnt, const uint8_t *skip, ObjPixel (*obj)[256],
+                 // OBJ mode 1 is semi-transparent: it alpha-blends with the
+                 // layer below it regardless of BLDCNT's first-target bits.
+                 obj[py][px].semi = (objmode == 1);
++                g_obj_rows[py] = 1;
+             }
+         }
+     }
+@@ -1180,10 +1206,15 @@ void sample_line(const BgLayer &c, int y, const uint32_t *pal32, uint32_t *col,
+         const uint32_t rowbase =
+             c.screen + ((ty >> 5) * blocks_w) * 0x800 + (ty & 31) * 32 * 2;
+         const int wm = c.map_w * 8 - 1;
++        int last_tx = -1;   /* a tile's pixels share one screen entry */
++        uint16_t se = 0;
+         for (int x = 0; x < 256; ++x) {
+             const int px = (x + c.hofs) & wm;
+             const int tx = px >> 3;
+-            const uint16_t se = rd16(rowbase + (tx >> 5) * 0x800 + (tx & 31) * 2);
++            if (tx != last_tx) {
++                last_tx = tx;
++                se = rd16(rowbase + (tx >> 5) * 0x800 + (tx & 31) * 2);
++            }
+             int fx = px & 7, fy = fy0;
+             if (se & 0x400) fx = 7 - fx;
+             if (se & 0x800) fy = 7 - fy;
+-- 
+2.55.0.windows.5
+

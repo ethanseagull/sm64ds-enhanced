@@ -1,0 +1,128 @@
+; gx_rec.v.pica -- step 5: the DS geometry engine's transform on the PICA.
+;
+; gx.cpp's record (ntr/gx.h, GxRecord) hands over each vertex as the display
+; list gave it, model x, y, z in raw 4.12 units, and per matrix id one matrix
+; from model space to the framebuffer in homogeneous form (X w, Y w, Z w, w):
+; the position matrix, the projection, the widen and to_screen's viewport map
+; in one product. gpu3ds.cpp folds its own viewport scale and offset in too and
+; keeps the last 20 of them in `ring`, id n in slot n mod 20. The vertex is
+; the record's own (GxRecVertex, uploaded as it is): its fourth short is the
+; id, and bit 15 of it -- a negative short -- says the id's projection is a
+; perspective one.
+;
+; Then what gpu3ds::draw does to a screen vertex, here in homogeneous form:
+; z is clamped to the far plane (Z <= 1) and negated, and `projection` turns
+; the screen. The clamp is only taken in front of the eye (w > 0): a vertex
+; behind it is the far end of an edge the hardware clips at the near plane
+; Z = 0, the plane gx.cpp clips at, and moving it would move the cut. An
+; orthographic id has no near plane in gx.cpp (it is clipped at w only), so
+; there Z is clamped at 0 as well.
+;
+;   v0  x, y, z, id           shorts: raw model coordinates, the matrix id
+;   v1  b, g, r, a            bytes, 0..255: the vertex colour (0xAARRGGBB
+;                             in memory, so blue first)
+;   v2  u, v                  texels (after texgen)
+;
+; texcoord1 is the toon table's s from the vertex red, as gx.v.pica's;
+; texcoord2 the fog ramp's: s = fogk.x * w + fogk.y * Z + fogk.z, a linear map
+; of the DS 15-bit depth (w * 8 W-buffered, Z * 0x7FFF Z-buffered) onto the
+; frame's FOG_TABLE (gpu3ds.cpp, set_fog).
+;
+; STEREO 3D (gpu3ds.cpp, set_stereo): `eye` = (e, d, c, 0) moves a vertex of a
+; perspective id across the screen by e max(1 - d / w, -c) pixels: nothing at
+; the depth d (the screen's plane), up to e at infinity, and at most c e the
+; other way in front of it. In homogeneous form X += p e max(w - d, -c w), so
+; it stays linear along an edge. 0 under one eye's picture (e = 0).
+
+.fvec projection[4]
+.fvec texscale
+.fvec colk
+.fvec colh
+.fvec fogk
+.fvec eye
+.fvec ring[80]
+
+.constf one(1.0, 0.0, 1e15, 0.5)
+.constf toonk(0.0037990196, 0.015625, 0.5, 0.0)
+.constf idk(0.5, 0.05, -20.0, -1e15)
+.constf idk2(32768.0, 4.0, 0.0, 0.0)
+
+.out outpos position
+.out outtc0 texcoord0
+.out outtc1 texcoord1
+.out outclr color
+.out outtc2 texcoord2
+
+.alias inpos v0
+.alias inclr v1
+.alias intc  v2
+
+.proc main
+    ; the id (bit 15 off) and p = 1 under a perspective projection
+    mov r7.x, inpos.w
+    slt r7.x, r7.x, one.y
+    mad r7.y, r7.x, idk2.x, inpos.w
+    ; its ring slot * 4: (id - 20 floor((id + 0.5) / 20)) * 4
+    add r7.z, idk.x, r7.y
+    mul r7.z, idk.y, r7.z
+    flr r7.z, r7.z
+    mad r7.w, r7.z, idk.z, r7.y
+    mul r7.w, idk2.y, r7.w
+    mova a0.x, r7.w
+
+    mov r0.xyz, inpos
+    mov r0.w, one.xxxx
+    dp4 r1.x, ring[a0.x], r0
+    dp4 r1.y, ring[a0.x+1], r0
+    dp4 r1.z, ring[a0.x+2], r0
+    dp4 r1.w, ring[a0.x+3], r0
+
+    ; the eye's shift (stereo 3D), p = r7.x
+    mov r3, eye
+    add r3.y, -r3.y, r1.w
+    mul r3.z, -r3.z, r1.w
+    max r3.y, r3.y, r3.z
+    mul r3.y, r3.x, r3.y
+    mad r1.x, r7.x, r3.y, r1.x
+
+    ; the fog ramp's coordinate, from the depth before the clamps
+    rcp r4.x, r1.w
+    mul r4.y, r1.z, r4.x
+    mul r4.z, fogk.x, r1.w
+    mad r4.z, r4.y, fogk.y, r4.z
+    add r4.z, fogk.z, r4.z
+
+    ; the far clamp where w > 0: z = min(z, s w + (1 - s) 1e15), s = (0 < w)
+    slt r2.x, one.y, r1.w
+    mul r3.x, r2.x, r1.w
+    add r3.y, one.x, -r2.x
+    mad r2.y, r3.y, one.z, r3.x
+    min r1.z, r1.z, r2.y
+    ; the near clamp, orthographic only: z = max(z, p * -1e15)
+    mul r7.x, idk.w, r7.x
+    max r1.z, r7.x, r1.z
+    mov r1.z, -r1.z
+
+    dp4 outpos.x, projection[0], r1
+    dp4 outpos.y, projection[1], r1
+    dp4 outpos.z, projection[2], r1
+    dp4 outpos.w, projection[3], r1
+
+    mul r5, texscale, intc
+    mov outtc0, r5
+
+    mul r5.x, toonk.x, inclr.z
+    add r5.x, toonk.y, r5.x
+    mov r5.y, toonk.z
+    mov outtc1, r5
+
+    mul r6, colk, inclr.zyxw
+    mad r6.xyz, inclr.zzzz, colh, r6
+    mov r6.w, colk.w
+    mov outclr, r6
+
+    mov r4.x, r4.z
+    mov r4.y, one.w
+    mov outtc2, r4
+    end
+.end

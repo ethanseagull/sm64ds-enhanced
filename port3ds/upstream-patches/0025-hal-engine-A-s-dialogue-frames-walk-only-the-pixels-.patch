@@ -1,0 +1,414 @@
+From 4ac4822249da0616c9b5f91107d44d63862c93b8 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 09:34:25 -0700
+Subject: [PATCH] hal: engine A's dialogue frames walk only the pixels that can
+ draw
+
+A dialogue box is one BG (BG3) inside WIN0 and ~2k composited pixels, but
+the compose visited all 49k per pass. Same pictures:
+- The BG loop goes layer by layer along each line (a pixel depends only on
+  the layers before it at that pixel, so the paint order is unchanged),
+  skips the columns the layer's window bit hides four at a time, and reads
+  a tile's screen entry and row of texels once, passing a row with no
+  opaque texel over whole. SM64DS_TWOD_VERIFY=1 against bg_loop_ref: 0
+  mismatching composites.
+- g_a_quiet: per row, which 8-column groups hold a hit (every writer marks
+  its group through a_mark), so the clear and the final blit visit only
+  those; the blit's brightness verdict reads the line's window mask once
+  and a card-held cell is written by blit_ov_cell.
+- hide_3d_outside_windows returns at once when every window region lets
+  BG0 through (each dialogue box), bm_fill_default copies a row whose
+  window rows match the last built row's without building it, and
+  build_objwin clears its mask only after a window sprite wrote it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 214 ++++++++++++++++++++------------
+ 1 file changed, 138 insertions(+), 76 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index 1fac46462..5b55f3010 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -484,39 +484,6 @@ bool sample_bg(const BgConfig &c, int x, int y, uint32_t &out) {
+     return true;
+ }
+ 
+-// sample_bg for the BG loop: the same answer, with the line's map row and the
+-// last screen entry kept between calls (a tile's 8 pixels share one) and the
+-// palette read from pal32, the standard BG palette expanded once a frame.
+-struct BgCursor { int py = 0; int tx = -1; uint16_t se = 0; };
+-inline void bg_cursor_line(const BgConfig &c, int y, BgCursor &k) {
+-    k.py = (y + c.vofs) & (c.tiles_h * 8 - 1);
+-    k.tx = -1;
+-}
+-inline bool sample_bg_at(const BgConfig &c, BgCursor &k, int x, const uint32_t *pal32,
+-                         uint32_t &out) {
+-    const int px = (x + c.hofs) & (c.tiles_w * 8 - 1);
+-    const int tx = px >> 3;
+-    if (tx != k.tx) { k.tx = tx; k.se = rd16(screen_entry_addr(c, tx, k.py >> 3)); }
+-    const uint16_t se = k.se;
+-    const int tile = se & 0x3FF;
+-    int fx = px & 7, fy = k.py & 7;
+-    if (se & 0x400) fx = 7 - fx;
+-    if (se & 0x800) fy = 7 - fy;
+-    uint32_t index;
+-    if (c.bpp8) {
+-        index = *reinterpret_cast<volatile uint8_t *>(c.chars + tile * 64 + fy * 8 + fx);
+-        if (index == 0) return false;
+-    } else {
+-        const uint8_t pair =
+-            *reinterpret_cast<volatile uint8_t *>(c.chars + tile * 32 + fy * 4 + (fx >> 1));
+-        index = (fx & 1) ? (pair >> 4) : (pair & 0xF);
+-        if (index == 0) return false;
+-        index += ((se >> 12) & 0xF) * 16;
+-    }
+-    out = pal32[index];
+-    return true;
+-}
+-
+ // ---- the window unit (engine A, register base 0x04000000) ------------------
+ // Mirror of ppu_sub.cpp's read_windows/window_mask. Bits 0..3 BG0..BG3, bit 4
+ // OBJ, bit 5 colour effect. Edges are exclusive; a right/bottom at or before
+@@ -588,7 +555,12 @@ void build_objwin(uint32_t dispcnt) {
+         {{16, 8}, {32, 8}, {32, 16}, {64, 32}},
+         {{8, 16}, {8, 32}, {16, 32}, {32, 64}},
+     };
+-    std::memset(g_objwin, 0, sizeof g_objwin);
++    /* cleared only when a window sprite wrote it since the last clear */
++    static bool s_objwin_zero = false;
++    if (!s_objwin_zero) {
++        std::memset(g_objwin, 0, sizeof g_objwin);
++        s_objwin_zero = true;
++    }
+     /* No sprites at all means no mask, and the window is then empty rather than
+        absent: WINOUT still governs, which is what the hardware does. */
+     if (!((dispcnt >> 12) & 1) || !((dispcnt >> 15) & 1) || objwin_off_env())
+@@ -677,7 +649,7 @@ void build_objwin(uint32_t dispcnt) {
+                 /* An opaque texel puts the pixel inside the window; the colour
+                    it would have had is discarded. A window sprite is never
+                    drawn, which is why raster_obj skips mode 2 outright. */
+-                if (index) g_objwin[py][px] = 1;
++                if (index) { g_objwin[py][px] = 1; s_objwin_zero = false; }
+             }
+         }
+     }
+@@ -870,6 +842,11 @@ inline bool winobj_off_env() {
+ void hide_3d_outside_windows(uint32_t dispcnt, const Windows &w, ntr::Framebuffer &fb)
+ {
+     if (!w.any || hide3d_off_env() || !bg0_3d_shown(dispcnt)) return;
++    /* every mask the unit can answer lets BG0 through (every dialogue box):
++       the scan below would find no pixel to hide */
++    if ((w.out & 1u) && (!w.on[0] || (w.in[0] & 1u)) && (!w.on[1] || (w.in[1] & 1u))
++        && (!w.obj_on || (w.obj_in & 1u)))
++        return;
+     /* the DS columns / rows whose mask clears BG0, one verdict per DS pixel */
+     static uint8_t hid[192][256];
+     bool any_hidden = false;
+@@ -996,6 +973,15 @@ Cell g_a[192][256];
+    empty rows: most of the HUD's 192 rows on a level frame. Zero at start: no
+    row is known clear until the first clear. */
+ uint8_t g_a_clean[192];
++/* g_a_quiet[y]: bit g set = columns 8g..8g+7 of row y are known to hold no
++   hit (all set by the clear). Every writer of a hit clears its group's bit
++   with g_a_clean (a_mark), so the clear and the final blit visit only the
++   groups that can hold one: a dialogue box's rows are mostly empty space. */
++uint32_t g_a_quiet[192];
++inline void a_mark(int y, int x) {
++    g_a_clean[y] = 0;
++    g_a_quiet[y] &= ~(1u << (x >> 3));
++}
+ 
+ // Owner ids: 0-3 are BG0..BG3 and 4 is the sprite layer. The same numbering is
+ // the bit position in the layer switch below, so a mask and an attribution row
+@@ -2370,7 +2356,7 @@ void raster_obj(uint32_t dispcnt, const Blend &bl, const Windows &win,
+                 }
+                 g_a[py][px].color = color;
+                 g_a[py][px].hit = true;
+-                g_a_clean[py] = 0;
++                a_mark(py, px);
+                 g_a[py][px].owner = kOwnerObj;
+                 /* whose texel this is, for the widescreen placement */
+                 g_a[py][px].msgcur = msgcur ? 1 : 0;
+@@ -2553,16 +2539,31 @@ void bm_fill_default(uint32_t dispcnt, const Windows &w) {
+     const unsigned char *card_prev = nullptr;
+     bool card_prev_in = false;
+     unsigned char card_prev_w[256];
++    /* with fixed edges and no OBJ window a line's mask is a function of which
++       windows' rows it is in: that pair (and whether it is a DS line) names the
++       row without building it */
++    const bool keyed = !w.any || (!w.rows_on && !w.obj_on);
++    int card_prev_key = -1;
+     for (int hy = 0; hy < ntr::active_h; ++hy) {
+         const int y = ds_row_of(hy);
++        unsigned char *row = g_bm + (size_t)hy * ntr::SCREEN_W;
++        if (card && keyed) {
++            const int key = y >= 192 ? 0
++                : 1 | ((w.any && w.on[0] && y >= w.y1[0] && y < w.y2[0]) ? 2 : 0)
++                    | ((w.any && w.on[1] && y >= w.y1[1] && y < w.y2[1]) ? 4 : 0);
++            if (card_prev && key == card_prev_key) {
++                std::memcpy(row, card_prev, (size_t)ntr::active_w);
++                continue;
++            }
++            card_prev_key = key;
++        }
+         if (y < 192 && y != wrow_y) {
+             window_mask_row(w, y, wrow);
+             wrow_y = y;
+         }
+-        unsigned char *row = g_bm + (size_t)hy * ntr::SCREEN_W;
+         if (card) {
+             const bool in = y < 192;
+-            if (card_prev && in == card_prev_in &&
++            if (!keyed && card_prev && in == card_prev_in &&
+                 (!in || std::memcmp(wrow, card_prev_w, sizeof wrow) == 0)) {
+                 std::memcpy(row, card_prev, (size_t)ntr::active_w);
+                 continue;
+@@ -2574,7 +2575,7 @@ void bm_fill_default(uint32_t dispcnt, const Windows &w) {
+             }
+             card_prev = row;
+             card_prev_in = in;
+-            if (in) std::memcpy(card_prev_w, wrow, sizeof wrow);
++            if (in && !keyed) std::memcpy(card_prev_w, wrow, sizeof wrow);
+             continue;
+         }
+         for (int hx = 0; hx < ntr::active_w; ++hx) {
+@@ -2588,6 +2589,20 @@ void bm_fill_default(uint32_t dispcnt, const Windows &w) {
+     g_bm_live = true;
+ }
+ 
++/* One 2D cell onto a frame held on the card: its host block takes the word
++   (colour and GX_OV_* verdict) and, with a mask live, the mask keeps its two
++   default bits under the cell's own (`bits`). */
++inline void blit_ov_cell(ntr::Framebuffer &fb, int hx0, int bw, int hy0, int hy1,
++                         uint32_t word, bool bm_on, unsigned char bits) {
++    for (int hy = hy0; hy < hy1; ++hy) {
++        uint32_t *const p = &fb.px[hy][hx0];
++        for (int dx = 0; dx < bw; ++dx) p[dx] = word;
++        if (!bm_on) continue;
++        unsigned char *const m = g_bm + (size_t)hy * ntr::SCREEN_W + hx0;
++        for (int dx = 0; dx < bw; ++dx) m[dx] = (unsigned char)((m[dx] & 3u) | bits);
++    }
++}
++
+ /* The mask of a frame that was held on the card and has been settled since:
+    one verdict a pixel, the way the processor's fade reads it. Needs the
+    coverage plane, which the settle has just filled. */
+@@ -2740,7 +2755,7 @@ void bg_loop_ref(Cell (*a)[256], const BgConfig *bgs, const Windows &win,
+                             s = blend_alpha(s, a[y][x].color, bl.eva, bl.evb);
+                         a[y][x].color = s;
+                         a[y][x].hit = true;
+-                        g_a_clean[y] = 0;   /* conservative when a is the verify copy */
++                        a_mark(y, x);   /* conservative when a is the verify copy */
+                         a[y][x].owner = (uint8_t)bg;
+                         a[y][x].prio = (uint8_t)prio;
+                     }
+@@ -3521,7 +3536,11 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     // it wins), honouring the per-pixel window mask.
+     for (int y = 0; y < 192; ++y) {
+         if (g_a_clean[y]) continue;
+-        for (int x = 0; x < 256; ++x) g_a[y][x].hit = false;
++        const uint32_t quiet = g_a_quiet[y];
++        for (int g = 0; g < 32; ++g)
++            if (!((quiet >> g) & 1u))
++                for (int x = g * 8; x < g * 8 + 8; ++x) g_a[y][x].hit = false;
++        g_a_quiet[y] = ~0u;
+         g_a_clean[y] = 1;
+     }
+ 
+@@ -3533,8 +3552,8 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+        and skip the ones not enabled, not at that priority or not in the layer
+        filter; this list is those same tests answered once, in the same order,
+        so each pixel visits only the layers that can draw. A frame with none
+-       (every level's HUD is sprites) skips the loop. The window test and
+-       everything after it are per pixel as before. bg_loop_ref is the old loop
++       (every level's HUD is sprites) skips the loop. Each layer then walks its
++       line a tile at a time (below). bg_loop_ref is the old loop
+        (SM64DS_TWOD_VERIFY=1 compares the two, SM64DS_TWOD_OLD=1 runs it alone). */
+     int bgorder[4], nbg = 0;
+     for (int prio = 3; prio >= 0; --prio)
+@@ -3548,30 +3567,69 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+         unsigned char wrow[256];
+         uint32_t pal32[256];
+         for (int i = 0; i < 256; ++i) pal32[i] = bgr555(rd16(kPlttBase + i * 2));
+-        BgCursor cur[4];
+         for (int y = 0; y < 192; ++y) {
+             window_mask_row(win, y, wrow);
+-            for (int k = 0; k < nbg; ++k) bg_cursor_line(bgs[bgorder[k]], y, cur[k]);
+-            for (int x = 0; x < 256; ++x) {
+-                const unsigned mask = wrow[x];
+-                for (int k = 0; k < nbg; ++k) {
+-                    const int bg = bgorder[k];
+-                    if (!(mask & (1u << bg))) continue;
+-                    uint32_t s;
+-                    if (sample_bg_at(bgs[bg], cur[k], x, pal32, s)) {
++            /* LAYER BY LAYER along the line. A pixel's result depends only on
++               the layers before it at that same pixel, so this is the paint
++               order of the pixel-by-pixel loop. Each layer visits only the
++               columns its window bit shows, a tile at a time: the screen entry
++               and the tile's row of texels are read once, and a row with no
++               opaque texel is passed over whole (a dialogue box's BG3 is
++               mostly blank tiles). */
++            for (int k = 0; k < nbg; ++k) {
++                const int bg = bgorder[k];
++                const BgConfig &c = bgs[bg];
++                const unsigned bit = 1u << bg;
++                const int py = (y + c.vofs) & (c.tiles_h * 8 - 1);
++                const int xmask = c.tiles_w * 8 - 1;
++                const uint32_t bit4 = bit * 0x01010101u;
++                for (int x = 0; x < 256;) {
++                    if (!(x & 3)) {   /* four columns the window hides at once */
++                        uint32_t w4;
++                        std::memcpy(&w4, wrow + x, 4);
++                        if (!(w4 & bit4)) { x += 4; continue; }
++                    }
++                    if (!(wrow[x] & bit)) { ++x; continue; }
++                    const int px = (x + c.hofs) & xmask;
++                    const int fx0 = px & 7;
++                    const int n = (8 - fx0 < 256 - x) ? 8 - fx0 : 256 - x;
++                    const uint16_t se = rd16(screen_entry_addr(c, px >> 3, py >> 3));
++                    const uint32_t tile = se & 0x3FF;
++                    const int fy = (se & 0x800) ? 7 - (py & 7) : (py & 7);
++                    uint32_t lo, hi = 0;
++                    if (c.bpp8) {
++                        const uint32_t at = c.chars + tile * 64 + fy * 8;
++                        lo = *reinterpret_cast<volatile uint32_t *>(at);
++                        hi = *reinterpret_cast<volatile uint32_t *>(at + 4);
++                    } else {
++                        lo = *reinterpret_cast<volatile uint32_t *>(c.chars + tile * 32 + fy * 4);
++                    }
++                    if (!(lo | hi)) { x += n; continue; }   /* index 0 all along */
++                    const uint32_t bank = c.bpp8 ? 0u : ((se >> 12) & 0xFu) * 16u;
++                    for (int i = 0; i < n; ++i, ++x) {
++                        const unsigned mask = wrow[x];
++                        if (!(mask & bit)) continue;
++                        const int fx = (se & 0x400) ? 7 - (fx0 + i) : fx0 + i;
++                        /* texel fx of the row: a byte (8bpp) or a nibble, low
++                           nibble first (4bpp), little-endian in the word */
++                        const uint32_t index = c.bpp8
++                            ? ((fx < 4 ? lo : hi) >> ((fx & 3) * 8)) & 0xFFu
++                            : (lo >> (fx * 4)) & 0xFu;
++                        if (!index) continue;
++                        uint32_t s = pal32[index + bank];
+                         // BGs draw far->near (prio 3..0, then bg 3..0), so when
+                         // a 1st-target BG writes, g_a already holds the layer
+                         // directly below it. Mode-1 alpha over a 2nd-target 2D
+                         // layer, gated by window bit 5.
+                         if (!bl.off && bl.mode == 1 && (mask & 0x20)
+-                            && (bl.first & (1u << bg)) && g_a[y][x].hit
++                            && (bl.first & bit) && g_a[y][x].hit
+                             && (bl.second & (1u << g_a[y][x].owner)))
+                             s = blend_alpha(s, g_a[y][x].color, bl.eva, bl.evb);
+                         g_a[y][x].color = s;
+                         g_a[y][x].hit = true;
+-                        g_a_clean[y] = 0;
++                        a_mark(y, x);
+                         g_a[y][x].owner = (uint8_t)bg;
+-                        g_a[y][x].prio = (uint8_t)bgs[bg].priority;
++                        g_a[y][x].prio = (uint8_t)c.priority;
+                     }
+                 }
+             }
+@@ -3893,7 +3951,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+             for (int y = 0; y < kHudZoneY0 - 1; ++y)
+                 for (int x = 255 - star_shift; x >= 180; --x) {
+                     Cell &c = g_a[y][x];
+-                    if (c.hit && c.owner == kOwnerObj) { g_a[y][x + star_shift] = c; c.hit = false; g_a_clean[y] = 0; }
++                    if (c.hit && c.owner == kOwnerObj) { g_a[y][x + star_shift] = c; c.hit = false; a_mark(y, x + star_shift); }
+                 }
+         }
+         if (fits) {
+@@ -3918,7 +3976,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                 const bool under = g_a[y - kHudCoinDy][x - dx_move].hit;   /* a live DS plane cell (a letter of POWER) sits where this moved cell lands */
+                 if (under) ++hud_erased;
+                 if (mask_out) mask_out[(y - kHudCoinDy) * 256 + (x - dx_move)] = under ? 2 : 1;
+-                if (g_hud_erase) { g_a[y - kHudCoinDy][x - dx_move] = c; g_a_clean[y - kHudCoinDy] = 0; }   /* PROOF ARM (env only): the pre-fix behaviour, the moved cell REPLACES the plane cell under it */
++                if (g_hud_erase) { g_a[y - kHudCoinDy][x - dx_move] = c; a_mark(y - kHudCoinDy, x - dx_move); }   /* PROOF ARM (env only): the pre-fix behaviour, the moved cell REPLACES the plane cell under it */
+                 g_hud_row[y - kHudCoinDy][x - dx_move] = 1;
+                 g_hud_row_live = true;
+             }
+@@ -3988,12 +4046,17 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     static int s_colx0[257], s_rowy0[193];
+     for (int i = 0; i <= 256; ++i) s_colx0[i] = ds_col_x0(i);
+     for (int i = 0; i <= 192; ++i) s_rowy0[i] = ds_row_y0(i);
++    unsigned char bm_wrow[256];
++    int bm_wrow_y = -1;
++    const unsigned bm_first = rd16(kRegBase + 0x50) & 0x3F;
+     for (int pass = 0; pass < 2; ++pass) {
+     if (pass && !g_hud_row_live) break;
+     /* pass 0 = the DS plane, pass 1 = the moved coin block's own plane (drawn after, so it covers what is under it) */
+     for (int y = 0; y < 192; ++y) {
+         if (!pass && g_a_clean[y]) continue;   /* no hit in this row of g_a */
++        const uint32_t quiet = pass ? 0u : g_a_quiet[y];
+         for (int x = 0; x < 256; ++x) {
++            if ((quiet >> (x >> 3)) & 1u) { x |= 7; continue; }   /* no hit in these 8 */
+             const Cell &gc = pass ? g_hud_cells[y][x] : g_a[y][x];
+             if (!gc.hit) continue;
+             if (pass && !g_hud_row[y][x]) continue;   /* g_hud_cells is not cleared per frame: only this frame's moved cells */
+@@ -4090,8 +4153,11 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+             if (lcv == 2) continue;
+             /* this 2D layer's brightness verdict, for every host pixel it
+                puts on screen (ENGINE A'S BRIGHTNESS TARGETS) */
+-            const unsigned char bmv =
+-                bm_on ? bm_verdict(lcow, window_mask(win, x, y)) : 0;
++            unsigned char bmv = 0;
++            if (bm_on) {   /* bm_verdict, the line's window mask built once */
++                if (bm_wrow_y != y) { window_mask_row(win, y, bm_wrow); bm_wrow_y = y; }
++                bmv = ((bm_wrow[x] & 0x20) && (bm_first & (1u << lcow))) ? 1 : 0;
++            }
+             /* SAVEOVL1: THE LIFT ON A CARD TICK. The lifted layers are in front of the 3D (checked above), so a lifted cell
+                is never an overlay word: it goes to its plane exactly as the classic loop below puts it there. A cell of
+                a banded layer is split by host row, the rows inside the band to the plane, the others drawn as ever. */
+@@ -4172,17 +4238,15 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                 || !layer_behind_3d(gc.owner, gc.prio, p3d)) {
+                 /* the owning 2D layer is in FRONT of the 3D layer (or there is
+                    no 3D layer in the picture): the old unconditional write */
++                if (ovl3d) {
++                    blit_ov_cell(fb, hx0, bw, hy0, hy1,
++                                 (c & 0x00FFFFFFu) | (GX_OV_FRONT << 24),
++                                 bm_on, (unsigned char)((bmv ? 4u : 0u) | 8u));
++                    continue;
++                }
+                 for (int hy = hy0; hy < hy1; ++hy)
+                     for (int dx = 0; dx < bw; ++dx) {
+                         const int hx = hx0 + dx;
+-                        if (ovl3d) {
+-                            fb.px[hy][hx] = (c & 0x00FFFFFFu) | (GX_OV_FRONT << 24);
+-                            if (bm_on) {
+-                                unsigned char &m = g_bm[(size_t)hy * ntr::SCREEN_W + hx];
+-                                m = (unsigned char)((m & 3u) | (bmv ? 4u : 0u) | 8u);
+-                            }
+-                            continue;
+-                        }
+                         if (cover && cover[hy * ntr::SCREEN_W + hx]) ++buried;
+                         if (lcv && lc_overlay_in_band(lcow, hy)) {
+                             lc_ov.col[(size_t)hy * ntr::SCREEN_W + hx] = c | 0xff000000u;
+@@ -4196,18 +4260,16 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                 continue;
+             }
+             /* BEHIND the 3D layer: it may only fill where 3D drew nothing */
+-            if (ovl3d) ntr::gx_card_note_behind();
++            if (ovl3d) {
++                ntr::gx_card_note_behind();
++                blit_ov_cell(fb, hx0, bw, hy0, hy1,
++                             (c & 0x00FFFFFFu) | (GX_OV_BEHIND << 24),
++                             bm_on, (unsigned char)((bmv ? 4u : 0u) | 16u));
++                continue;
++            }
+             for (int hy = hy0; hy < hy1; ++hy)
+                 for (int dx = 0; dx < bw; ++dx) {
+                     const int hx = hx0 + dx;
+-                    if (ovl3d) {
+-                        fb.px[hy][hx] = (c & 0x00FFFFFFu) | (GX_OV_BEHIND << 24);
+-                        if (bm_on) {
+-                            unsigned char &m = g_bm[(size_t)hy * ntr::SCREEN_W + hx];
+-                            m = (unsigned char)((m & 3u) | (bmv ? 4u : 0u) | 16u);
+-                        }
+-                        continue;
+-                    }
+                     if (cover[hy * ntr::SCREEN_W + hx]) { ++kept; continue; }
+                     if (lcv && lc_overlay_in_band(lcow, hy)) {
+                         lc_ov.col[(size_t)hy * ntr::SCREEN_W + hx] = c | 0xff000000u;
+-- 
+2.55.0.windows.5
+

@@ -1,0 +1,72 @@
+From 41f7ec027541c5d64c513a001b9880daa084bba0 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Wed, 21 Oct 2026 14:00:50 -0700
+Subject: [PATCH] hal: a HUD element across the DS screen's middle column stays
+ centred
+
+In Koopa the Quick's race the power meter (DS x 108-150) and the race timer
+(x 154-240) are bridged into one widescreen HUD element whose centre lies in
+the right band, so the meter rode the right edge whenever it came in. An
+element whose marks cross x 128 now takes the centre anchor: the meter never
+moves, the timer sits beside it as on the DS while it is up, and rides the
+right edge alone. Both labellings (row runs and the per-pixel passes) share
+the one anchor rule.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 25 +++++++++++++++++++++----
+ 1 file changed, 21 insertions(+), 4 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index 5ee989195..9a3741f1b 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -1330,6 +1330,25 @@ void unite(int a, int b) {
+     if (a != b) g_par[a > b ? a : b] = (a < b) ? a : b;
+ }
+ 
++// One element's anchor, from its marks' extent x0..x1: its centre against the
++// two splits, EXCEPT that an element across the DS screen's middle column is
++// centred whatever its centre says. The power meter is drawn about x 128
++// (HUD::RenderHealthMeter, x 0x80, DS x 108-150), and Koopa the Quick's race
++// timer (HUD::RenderTimeTimer) starts 3 columns right of it at x 154: in a
++// race the bridge makes them one element, centre 197, and the meter rode the
++// right edge with the timer whenever it came in (the 5zd hardware run). So
++// that group stays centred (the timer beside the meter as on the DS) and the
++// meter never moves; the timer alone still rides the right edge. Nothing
++// else on this HUD crosses x 128 (the red coin row ends near 100, the lives
++// at 47, the counters start at 188) but a centred banner, which was centred
++// already.
++int anchor(int x0, int x1, int band_l, int band_r, int margin)
++{
++    if (x0 <= 128 && x1 >= 128) return margin / 2;
++    const int c = (x0 + x1) / 2;
++    return (c < band_l) ? 0 : (c >= band_r) ? margin : margin / 2;
++}
++
+ // SM64DS_HUD_RUNS=0: the per-pixel passes below instead of resolve_runs;
+ // SM64DS_HUD_RUNS_VERIFY=1: both, the labels compared (a line every 120
+ // relabelled frames).
+@@ -1445,8 +1464,7 @@ void resolve_runs(int band_l, int band_r, int margin, int ylo, int yhi, const bo
+     g_off[0] = margin / 2;
+     for (int i = 1; i < g_nlab; ++i) {
+         if (x1[i] < 0) { g_off[i] = margin / 2; continue; }
+-        const int c = (x0[i] + x1[i]) / 2;
+-        g_off[i] = (c < band_l) ? 0 : (c >= band_r) ? margin : margin / 2;
++        g_off[i] = anchor(x0[i], x1[i], band_l, band_r, margin);
+     }
+ }
+ 
+@@ -1735,8 +1753,7 @@ void resolve(int band_l, int band_r, int margin)
+     g_off[0] = margin / 2;
+     for (int i = 1; i < g_nlab; ++i) {
+         if (x1[i] < 0) { g_off[i] = margin / 2; continue; }
+-        const int c = (x0[i] + x1[i]) / 2;
+-        g_off[i] = (c < band_l) ? 0 : (c >= band_r) ? margin : margin / 2;
++        g_off[i] = anchor(x0[i], x1[i], band_l, band_r, margin);
+     }
+ }
+ 
+-- 
+2.55.0.windows.5
+

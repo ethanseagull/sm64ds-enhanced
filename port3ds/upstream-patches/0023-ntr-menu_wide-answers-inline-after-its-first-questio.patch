@@ -1,0 +1,49 @@
+From 618a48954ebdf56c6d4a7a7540d9d2ea1d6f7b57 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 05:40:12 -0700
+Subject: [PATCH] ntr: menu_wide() answers inline after its first question of
+ the frame
+
+view_to_clip asks it once a vertex; the callback runs once a frame
+(menu_wide_eval), every later answer is a test of g.mw_eval and g.mw_on.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp | 20 ++++++++++++--------
+ 1 file changed, 12 insertions(+), 8 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 7ae0d7059..2f8a82135 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -561,15 +561,19 @@ const Mat *mtx_for_gen(uint32_t gen) {
+    everything else (the page model: the castle reflection) is zoomed by the callback's factor about the frame centre. */
+ bool (*g_menu_wide_cb)(float *zoom, float *dy);
+ int g_menu_sprite;
+-bool menu_wide() {
++/* The first question of a frame asks the callback; every later one (one per
++   vertex, through view_to_clip) is the inline test below. */
++bool menu_wide_eval() {
++    g.mw_eval = 1;
++    float z = 1.0f, dy = 0.0f;
++    g.mw_on = g_menu_wide_cb(&z, &dy) ? 1 : 0;
++    g.mw_zoom = z; g.mw_dy = dy;
++    if (g.mw_on) { g.vp_x = 0; g.vp_y = 0; g.vp_w = active_w; g.vp_h = active_h; }
++    return g.mw_on != 0;
++}
++inline bool menu_wide() {
+     if (!g_menu_wide_cb) return false;
+-    if (!g.mw_eval) {
+-        g.mw_eval = 1;
+-        float z = 1.0f, dy = 0.0f;
+-        g.mw_on = g_menu_wide_cb(&z, &dy) ? 1 : 0;
+-        g.mw_zoom = z; g.mw_dy = dy;
+-        if (g.mw_on) { g.vp_x = 0; g.vp_y = 0; g.vp_w = active_w; g.vp_h = active_h; }
+-    }
++    if (!g.mw_eval) return menu_wide_eval();
+     return g.mw_on != 0;
+ }
+ 
+-- 
+2.55.0.windows.5
+

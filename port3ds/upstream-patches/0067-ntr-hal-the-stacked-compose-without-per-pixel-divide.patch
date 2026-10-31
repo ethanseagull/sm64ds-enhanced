@@ -1,0 +1,123 @@
+From aafaf4015b1b59834a4c804c803799f2f7882934 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Wed, 28 Oct 2026 15:29:52 -0700
+Subject: [PATCH] ntr/hal: the stacked compose without per-pixel divides; the
+ 3D window mask in runs
+
+The engine B panel's x / ry stepped (a library divide a pixel on the 3DS's
+ARM11, ~49K a frame for a minigame), the gap band's / den a reciprocal
+multiply (exact for its numerators), and hide_3d_outside_windows fills the
+hidden runs made once per distinct row instead of testing every host pixel.
+The same pictures (Memory Match, 900 frames, byte-identical).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 43 +++++++++++++++++++++++++++------
+ port/ntr/ppu_sub.cpp            | 19 +++++++++++----
+ 2 files changed, 49 insertions(+), 13 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index 2bd88ffd6..76d5dfc10 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -900,15 +900,42 @@ void hide_3d_outside_windows(uint32_t dispcnt, const Windows &w, ntr::Framebuffe
+             s_dsx[hx] = hx / sx;
+         }
+     }
++    /* THE HIDDEN HOST COLUMNS AS RUNS, made once per distinct DS row (a
++       window is a rectangle: most rows are the row above's) and each run
++       filled whole -- not a test a host pixel, 96K a frame (3DS profile,
++       Memory Match: 4% of the game thread) */
++    static short runs[ntr::SCREEN_W][2];
++    int nruns = 0, run_y = -2;
+     for (int hy = 0; hy < ntr::active_h; ++hy) {
+-        const int y = ds_row_of(hy);
+-        for (int hx = 0; hx < ntr::active_w; ++hx) {
+-            const int x = s_dsx[hx];
+-            const bool h = (x >= 0 && x < 256 && y < 192) ? hid[y][x] != 0 : out_hidden;
+-            if (!h) continue;
+-            fb.px[hy][hx] = bd;
+-            if (pre) pre[(size_t)hy * ntr::SCREEN_W + hx] = bd;
+-            if (cover) cover[(size_t)hy * ntr::SCREEN_W + hx] = 0;
++        const int dy = ds_row_of(hy);
++        const int y = dy < 192 ? dy : -1;   /* -1: below the DS rows, all "outside" */
++        if (y != run_y) {
++            const bool same = y >= 0 && run_y >= 0 && std::memcmp(hid[y], hid[run_y], 256) == 0;
++            run_y = y;
++            if (!same) {
++                nruns = 0;
++                bool open = false;
++                for (int hx = 0; hx <= ntr::active_w; ++hx) {
++                    bool h = false;
++                    if (hx < ntr::active_w) {
++                        const int x = s_dsx[hx];
++                        h = (x >= 0 && x < 256 && y >= 0) ? hid[y][x] != 0 : out_hidden;
++                    }
++                    if (h && !open) {
++                        runs[nruns][0] = (short)hx;
++                        open = true;
++                    } else if (!h && open) {
++                        runs[nruns++][1] = (short)hx;
++                        open = false;
++                    }
++                }
++            }
++        }
++        for (int r = 0; r < nruns; ++r) {
++            const int x0 = runs[r][0], n = runs[r][1] - x0;
++            std::fill_n(&fb.px[hy][x0], n, bd);
++            if (pre) std::fill_n(pre + (size_t)hy * ntr::SCREEN_W + x0, n, bd);
++            if (cover) std::memset(cover + (size_t)hy * ntr::SCREEN_W + x0, 0, (size_t)n);
+         }
+     }
+ }
+diff --git a/port/ntr/ppu_sub.cpp b/port/ntr/ppu_sub.cpp
+index 313c02519..b35768fab 100644
+--- a/port/ntr/ppu_sub.cpp
++++ b/port/ntr/ppu_sub.cpp
+@@ -2802,6 +2802,9 @@ void band_fill_ambient(uint32_t *dst, int dst_w, const StackLayout &lay)
+        same answer. Outside the first and last centres the end column's own
+        value stands, which is the honest edge behaviour -- there is nothing
+        beyond it to interpolate towards. */
++    const uint64_t inv = lay.band_h > 0
++                             ? ((1ull << 40) + (uint64_t)(2 * lay.band_h) - 1) / (uint64_t)(2 * lay.band_h)
++                             : 0;
+     for (int x = 0; x < lay.w; ++x) {
+         RGB t, b;
+         if (x <= centre[0]) {
+@@ -2823,11 +2826,15 @@ void band_fill_ambient(uint32_t *dst, int dst_w, const StackLayout &lay)
+             b.b = (bots[c].b * v + bots[c + 1].b * u) / span;
+         }
+         const int den = 2 * lay.band_h;
++        /* / den as a multiply by its reciprocal (2^40 / den, rounded up): the
++           same quotient for any numerator n with n * den < 2^40 (here n <=
++           255 * den), without three library divides a pixel on the ARM11 */
++        auto div_den = [inv](int n) { return (int)(((uint64_t)(uint32_t)n * inv) >> 40); };
+         for (int k = 0; k < lay.band_h; ++k) {
+             const int num = 2 * k + 1;
+-            const int r = (t.r * (den - num) + b.r * num) / den;
+-            const int g = (t.g * (den - num) + b.g * num) / den;
+-            const int bl = (t.b * (den - num) + b.b * num) / den;
++            const int r = div_den(t.r * (den - num) + b.r * num);
++            const int g = div_den(t.g * (den - num) + b.g * num);
++            const int bl = div_den(t.b * (den - num) + b.b * num);
+             dst[(size_t)(lay.band_y + k) * dst_w + x] =
+                 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) |
+                 (uint32_t)bl;
+@@ -5471,9 +5478,11 @@ void ppu_compose_stacked(const uint32_t *top, const SubFramebuffer &sub,
+             uint32_t *out = dst + (size_t)(b_y + y) * dst_w;
+             for (int x = 0; x < px0; ++x) out[x] = 0xFF000000u;
+             for (int x = px0 + pw; x < active_w; ++x) out[x] = 0xFF000000u;
+-            for (int x = 0; x < pw; ++x) {
+-                const int sx = x / ry;
++            /* x / ry stepped, not divided: a library divide a pixel on the
++               3DS's ARM11 (~49K a frame for a minigame's panel) */
++            for (int x = 0, sx = 0, k = 0; x < pw; ++x) {
+                 out[px0 + x] = src[sx < SUB_W ? sx : SUB_W - 1];
++                if (++k == ry) { k = 0; ++sx; }
+             }
+         }
+ 
+-- 
+2.55.0.windows.5
+

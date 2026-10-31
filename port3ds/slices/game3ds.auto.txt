@@ -1,0 +1,9 @@
+# Kept by hand, not by tools/closure.py (which test_all never runs for the
+# game): src/ files game3ds needs beyond the PC port's manifest. Paths
+# relative to PORT_ROOT.
+#
+# The boot worker's file-name tables in RAM (hal/boot_os.cpp, 3ds/patches):
+src/func_0205d94c.c
+src/func_0205c9b8.c
+src/func_0205c91c.c
+src/func_0205c7e4.c

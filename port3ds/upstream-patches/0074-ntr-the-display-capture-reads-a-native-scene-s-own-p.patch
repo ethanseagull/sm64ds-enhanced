@@ -1,0 +1,62 @@
+From 279ae0ae6ce265f00e9c344b7adbf64b90894c80 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 10:45:02 -0700
+Subject: [PATCH] ntr: the display capture reads a native scene's own picture
+
+A scene presented natively has the DS picture centred in the wider extent; the capture read it from column 0, so the trampolines' captured frames came back 32 columns off the frame drawn beside them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/ppu.cpp | 16 ++++++++++++----
+ 1 file changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/port/ntr/ppu.cpp b/port/ntr/ppu.cpp
+index 069d35dd3..e756096b4 100644
+--- a/port/ntr/ppu.cpp
++++ b/port/ntr/ppu.cpp
+@@ -930,7 +930,15 @@ void ppu_display_capture(const uint32_t *src, int w, int h) {
+        number at every 4:3 extent the port can be configured at, because
+        configure_aspect anchors a scaled height on a whole multiple of 192 and
+        the native-sentinel width on the same multiple of 256. */
+-    const int rx = w / SUB_W, ry = h / SUB_H;
++    /* A SCENE PRESENTED NATIVELY (present_native) has the DS's picture centred
++       in the wider extent, and that picture is what engine A drew: the capture
++       reads it, not the extent from its left edge. Read from column 0 it took
++       the pillarbox's columns too, and every captured frame of the trampolines
++       came back 32 columns off the frame drawn beside it (3DS lane). */
++    const bool nat = present_native();
++    const int cx0 = nat ? present_x() : 0, cy0 = nat ? present_y() : 0;
++    const int pw = nat ? present_w() : w, ph = nat ? present_h() : h;
++    const int rx = pw / SUB_W, ry = ph / SUB_H;
+ 
+     /* THE FIRST CAPTURE SAYS WHAT IT IS, once, on stderr. This unit is the
+        whole basis of the four dual-screen minigames -- the game READS the
+@@ -950,7 +958,7 @@ void ppu_display_capture(const uint32_t *src, int w, int h) {
+                          "%dx%d picture (stride %d) into block %u at +%05x, "
+                          "nearest at %d x %d per DS pixel%s\n",
+                          cap, cw, ch, w, h, SCREEN_W, block, off, rx, ry,
+-                         (rx * SUB_W == w && ry * SUB_H == h)
++                         (rx * SUB_W == pw && ry * SUB_H == ph)
+                              ? " (an exact whole-number downsample)"
+                              : " (the extent is not a whole DS multiple; the "
+                                "sample walks, as it does on every odd aspect "
+@@ -992,14 +1000,14 @@ void ppu_display_capture(const uint32_t *src, int w, int h) {
+        in this loop the compiler cannot keep in a register. */
+     unsigned long long h1 = g_cap_hash;
+     for (int y = 0; y < ch; ++y) {
+-        const int sy = ry > 0 ? y * ry : (y * h) / SUB_H;
++        const int sy = cy0 + (ry > 0 ? y * ry : (y * ph) / SUB_H);
+         /* w/h are the LIVE image extent; the framebuffer's row stride is always
+            SCREEN_W (the buffer max), which equals w on every fixed tier and is
+            1024 on NTR_WIDE_RT with a 512-wide active image. Index by the stride,
+            sample within the extent. */
+         const uint32_t *row = src + (size_t)(sy < h ? sy : h - 1) * (size_t)SCREEN_W;
+         for (int x = 0; x < cw; ++x) {
+-            const int sx = rx > 0 ? x * rx : (x * w) / SUB_W;
++            const int sx = cx0 + (rx > 0 ? x * rx : (x * pw) / SUB_W);
+             const uint32_t p = row[sx < w ? sx : w - 1];
+             /* ARGB8888 -> BGR555, and BIT 15 SET. On hardware the captured
+                alpha bit says "this pixel was opaque"; engine A's finished
+-- 
+2.55.0.windows.5
+

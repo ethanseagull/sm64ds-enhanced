@@ -1,0 +1,309 @@
+From b52ad47e12e9a0711e2080409a932c2067bd49bf Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 11:41:19 -0700
+Subject: [PATCH] hal: the widescreen HUD element pass works only where a mark
+ can reach
+
+hudelem::resolve (widescreen only) labelled every HUD row's 256 columns in
+six sweeps each frame. Now:
+- The passes visit, per row, only the 8-column groups within the bridge of
+  a group holding a hit (g_a_quiet; two groups across, kBridgeY rows down);
+  outside them every result is the zero the whole-row passes left. The
+  vertical dilation keeps each column's nearest snapshot row instead of a
+  run count, so skipped groups need no stepping.
+- The labels are a function of the marks and the three placement numbers:
+  when both match the last frame's, the last frame's g_lbl / g_off stand
+  and nothing else runs (the HUD is the same picture most frames).
+- on[] and g_lbl rows are cleared only where the last frame wrote.
+Same labels and anchors: checked against the old function on every frame
+of the 3DS widescreen regression runs and 40 more levels (0 differences).
+Azahar, 3DS wide build, message phase: Hazy Maze Cave 4.1 -> 1.2 ms,
+Bob-omb Battlefield's dialogue 7.4 -> 4.3 ms.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 201 +++++++++++++++++++++-----------
+ 1 file changed, 135 insertions(+), 66 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index 5b55f3010..4641fcf6d 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -1329,30 +1329,61 @@ void resolve(int band_l, int band_r, int margin)
+     // read by the dilation and the extents. Output identical, a fraction of
+     // the work when the marks are sparse (before it, this pass was ~17% of the
+     // 3DS main thread's samples in a Bob-omb Battlefield frame, in Azahar).
++    //
++    // AND THE COLUMNS (8-column groups, as g_a_quiet keeps them): a mark can
++    // reach kBridgeX = 2 groups across and kBridgeY rows down, so on each row
++    // the passes visit only the groups within that reach of a group holding a
++    // hit (`reach`), and everything outside is zero, as the whole-row passes
++    // left it. A HUD is a few clusters at the corners and the centre.
++    static_assert(kBridgeX == 16, "the group reach below is two 8-column groups");
++    // THE LABELS ARE A FUNCTION OF THE MARKS AND THE THREE PLACEMENT NUMBERS
++    // ALONE, and a HUD is the same picture most frames: when the marks match
++    // the last frame's (and the numbers do), last frame's g_lbl / g_off are
++    // this frame's and nothing below runs. A row of on[] holds a mark exactly
++    // when it was marked; g_lbl rows are cleared only where the last frame
++    // labelled (lbl_set): most rows hold no HUD.
+     static uint8_t on[192][256];
++    static bool was_marked[192], lbl_set[192];
++    static int last_l = -1, last_r = -1, last_m = -1;
++    bool changed = band_l != last_l || band_r != last_r || margin != last_m;
+     bool marked[192];
++    uint32_t hitg[192];   // the groups that may hold a mark
+     int ymin = 192, ymax = -1;
+     for (int y = 0; y < 192; ++y) {
+         bool any = false;
+-        if (g_a_clean[y]) {   // no hit in the row: no mark
+-            std::memset(on[y], 0, sizeof on[y]);
+-        } else {
+-            for (int x = 0; x < 256; ++x) {
+-                const bool m = g_a[y][x].hit && !msg_layer_px(y, x) && !(g_hud_erase && g_hud_row_live && g_hud_row[y][x]);
+-                on[y][x] = m ? 1 : 0;
+-                any |= m;
++        hitg[y] = g_a_clean[y] ? 0u : ~g_a_quiet[y];
++        if (hitg[y]) {
++            uint8_t row[256];
++            std::memset(row, 0, sizeof row);
++            for (int g = 0; g < 32; ++g) {
++                if (!((hitg[y] >> g) & 1u)) continue;
++                for (int x = g * 8; x < g * 8 + 8; ++x) {
++                    const bool m = g_a[y][x].hit && !msg_layer_px(y, x) && !(g_hud_erase && g_hud_row_live && g_hud_row[y][x]);
++                    row[x] = m ? 1 : 0;
++                    any |= m;
++                }
++            }
++            if ((any || was_marked[y]) && std::memcmp(on[y], row, sizeof row) != 0) {
++                std::memcpy(on[y], row, sizeof row);
++                changed = true;
+             }
++        } else if (was_marked[y]) {
++            std::memset(on[y], 0, sizeof on[y]);
++            changed = true;
+         }
+-        marked[y] = any;
++        was_marked[y] = marked[y] = any;
+         if (any) { if (y < ymin) ymin = y; ymax = y; }
+     }
++    if (!changed) return;
++    last_l = band_l;
++    last_r = band_r;
++    last_m = margin;
+     const int ylo = ymin - kBridgeY < 0 ? 0 : ymin - kBridgeY;
+     const int yhi = ymax + kBridgeY > 191 ? 191 : ymax + kBridgeY;   // < ylo when there is no mark
+     // A row with no mark within kBridgeY of it holds no dilated pixel and so
+     // no label, wherever it sits (the HUD's top rows and the red coin row at
+     // the bottom leave most of the band between them empty). The passes run
+-    // over the near rows only; across a far row every column's run is already
+-    // past kBridgeY, which is where a sweep restarts it.
++    // over the near rows only.
+     bool near[192];
+     {
+         int last = -1000;
+@@ -1361,31 +1392,53 @@ void resolve(int band_l, int band_r, int margin)
+         for (int y = 191; y >= 0; --y) { if (marked[y]) last = y; if (last - y <= kBridgeY) near[y] = true; }
+     }
+     for (int y = 0; y < 192; ++y)
+-        if (!near[y]) std::memset(g_lbl[y], 0, sizeof g_lbl[y]);
++        if (!near[y] && lbl_set[y]) { std::memset(g_lbl[y], 0, sizeof g_lbl[y]); lbl_set[y] = false; }
++    // The groups each pass can touch: a marked row's hit groups widened two
++    // either way (horizontal), then that over kBridgeY rows up and down.
++    uint32_t hreach[192], reach[192];
++    for (int y = 0; y < 192; ++y) {
++        const uint32_t m = marked[y] ? hitg[y] : 0u;
++        hreach[y] = m | (m << 1) | (m << 2) | (m >> 1) | (m >> 2);
++    }
++    for (int y = 0; y < 192; ++y) {
++        uint32_t r = 0;
++        for (int d = -kBridgeY; d <= kBridgeY; ++d)
++            if (y + d >= 0 && y + d < 192) r |= hreach[y + d];
++        reach[y] = r;
++    }
+ 
+     // Pass 1: horizontal dilation. A running count of "columns since the last
+     // set pixel" turns a left-to-right sweep into a one-sided dilation, and the
+     // right-to-left sweep completes it, so the whole radius costs two adds per
+-    // pixel rather than a kBridgeX-wide window scan at each one.
++    // pixel rather than a kBridgeX-wide window scan at each one. A group out of
++    // reach holds no mark and no dilated pixel: the count steps over it.
+     static uint8_t dil[192][256];
+     for (int y = ylo; y <= yhi; ++y) {
+         if (!near[y]) continue;
+-        if (!marked[y]) { std::memset(dil[y], 0, sizeof dil[y]); continue; }
++        std::memset(dil[y], 0, sizeof dil[y]);
++        if (!marked[y]) continue;
++        const uint32_t hr = hreach[y];
+         int run = kBridgeX + 1;
+-        for (int x = 0; x < 256; ++x) {
+-            run = on[y][x] ? 0 : (run + 1);
+-            dil[y][x] = (run <= kBridgeX) ? 1 : 0;
++        for (int g = 0; g < 32; ++g) {
++            if (!((hr >> g) & 1u)) { run = run + 8 > kBridgeX + 1 ? kBridgeX + 1 : run + 8; continue; }
++            for (int x = g * 8; x < g * 8 + 8; ++x) {
++                run = on[y][x] ? 0 : (run + 1);
++                dil[y][x] = (run <= kBridgeX) ? 1 : 0;
++            }
+         }
+         run = kBridgeX + 1;
+-        for (int x = 255; x >= 0; --x) {
+-            run = on[y][x] ? 0 : (run + 1);
+-            if (run <= kBridgeX) dil[y][x] = 1;
++        for (int g = 31; g >= 0; --g) {
++            if (!((hr >> g) & 1u)) { run = run + 8 > kBridgeX + 1 ? kBridgeX + 1 : run + 8; continue; }
++            for (int x = g * 8 + 7; x >= g * 8; --x) {
++                run = on[y][x] ? 0 : (run + 1);
++                if (run <= kBridgeX) dil[y][x] = 1;
++            }
+         }
+     }
+-    // Pass 2: vertical dilation, the same two-sweep trick down the columns. It
+-    // reads the HORIZONTALLY dilated mask, so the result is the rectangular
+-    // dilation of the original -- which is what makes two marks that are
+-    // diagonally apart within the two radii one element.
++    // Pass 2: vertical dilation, down and up each column. It reads the
++    // HORIZONTALLY dilated mask, so the result is the rectangular dilation of
++    // the original -- which is what makes two marks that are diagonally apart
++    // within the two radii one element.
+     //
+     // IT READS A SNAPSHOT, NOT THE BUFFER IT IS WRITING. Sweeping down and
+     // then up over the SAME array lets the second sweep treat pixels the
+@@ -1397,61 +1450,73 @@ void resolve(int band_l, int band_r, int margin)
+     // elements the placement actually acted on. A checker grouping by a
+     // different rule from the code is measuring its own opinion.
+     //
+-    // The sweeps start and end at the band's edges: outside it there is no
+-    // mark, so a sweep from the plane's edge would arrive there with its run
+-    // still past kBridgeY, which is where these start it. They go a row at a
+-    // time with a run per column (the same counts as a sweep down each
+-    // column, read in memory order).
++    // Each column keeps the row of its nearest snapshot pixel above (`up`) and
++    // below (`dn`); a pixel within kBridgeY of either is set. A snapshot pixel
++    // lies only in its row's hreach, so a group out of a row's reach neither
++    // moves a column's row nor gets a pixel.
+     static uint8_t vsrc[192][256];
+     for (int y = ylo; y <= yhi; ++y)
+         if (near[y]) std::memcpy(vsrc[y], dil[y], sizeof vsrc[0]);
+     {
+-        uint8_t run[256];
+-        std::memset(run, kBridgeY + 1, sizeof run);
++        int up[256], dn[256];
++        for (int x = 0; x < 256; ++x) up[x] = -1000;
+         for (int y = ylo; y <= yhi; ++y) {
+-            if (!near[y]) { std::memset(run, kBridgeY + 1, sizeof run); continue; }
+-            for (int x = 0; x < 256; ++x) {
+-                if (vsrc[y][x]) { run[x] = 0; continue; }
+-                if (run[x] <= kBridgeY) ++run[x];
+-                if (run[x] <= kBridgeY) dil[y][x] = 1;
++            if (!near[y]) continue;
++            const uint32_t r = reach[y];
++            for (int g = 0; g < 32; ++g) {
++                if (!((r >> g) & 1u)) continue;
++                for (int x = g * 8; x < g * 8 + 8; ++x) {
++                    if (vsrc[y][x]) { up[x] = y; continue; }
++                    if (y - up[x] <= kBridgeY) dil[y][x] = 1;
++                }
+             }
+         }
+-        std::memset(run, kBridgeY + 1, sizeof run);
++        for (int x = 0; x < 256; ++x) dn[x] = 1000;
+         for (int y = yhi; y >= ylo; --y) {
+-            if (!near[y]) { std::memset(run, kBridgeY + 1, sizeof run); continue; }
+-            for (int x = 0; x < 256; ++x) {
+-                if (vsrc[y][x]) { run[x] = 0; continue; }
+-                if (run[x] <= kBridgeY) ++run[x];
+-                if (run[x] <= kBridgeY) dil[y][x] = 1;
++            if (!near[y]) continue;
++            const uint32_t r = reach[y];
++            for (int g = 0; g < 32; ++g) {
++                if (!((r >> g) & 1u)) continue;
++                for (int x = g * 8; x < g * 8 + 8; ++x) {
++                    if (vsrc[y][x]) { dn[x] = y; continue; }
++                    if (dn[x] - y <= kBridgeY) dil[y][x] = 1;
++                }
+             }
+         }
+     }
+ 
+     // Pass 3: provisional labels with 8-connectivity over the dilated mask,
+     // unioning as we go. 8 rather than 4 so a diagonal touch does not split an
+-    // element that the dilation only just closed.
++    // element that the dilation only just closed. Out of reach the labels stay
++    // the zero the row was cleared to.
+     g_nlab = 1;
+     g_par[0] = 0;
+     for (int y = ylo; y <= yhi; ++y) {
+         if (!near[y]) continue;   // labels zeroed above
+-        for (int x = 0; x < 256; ++x) {
+-            if (!dil[y][x]) { g_lbl[y][x] = 0; continue; }
+-            int best = 0;
+-            for (int dy = -1; dy <= 0; ++dy) {
+-                for (int dx = -1; dx <= 1; ++dx) {
+-                    if (dy == 0 && dx >= 0) continue;
+-                    const int ny = y + dy, nx = x + dx;
+-                    if (ny < 0 || nx < 0 || nx >= 256) continue;
+-                    const int nl = g_lbl[ny][nx];
+-                    if (!nl) continue;
+-                    if (!best) best = nl; else unite(best, nl);
++        std::memset(g_lbl[y], 0, sizeof g_lbl[y]);
++        lbl_set[y] = true;
++        const uint32_t r = reach[y];
++        for (int g = 0; g < 32; ++g) {
++            if (!((r >> g) & 1u)) continue;
++            for (int x = g * 8; x < g * 8 + 8; ++x) {
++                if (!dil[y][x]) continue;
++                int best = 0;
++                for (int dy = -1; dy <= 0; ++dy) {
++                    for (int dx = -1; dx <= 1; ++dx) {
++                        if (dy == 0 && dx >= 0) continue;
++                        const int ny = y + dy, nx = x + dx;
++                        if (ny < 0 || nx < 0 || nx >= 256) continue;
++                        const int nl = g_lbl[ny][nx];
++                        if (!nl) continue;
++                        if (!best) best = nl; else unite(best, nl);
++                    }
+                 }
++                if (!best) {
++                    if (g_nlab < kMaxLabels) { best = g_nlab; g_par[best] = best; ++g_nlab; }
++                    else best = kMaxLabels - 1;   // see the bound note above
++                }
++                g_lbl[y][x] = (int16_t)best;
+             }
+-            if (!best) {
+-                if (g_nlab < kMaxLabels) { best = g_nlab; g_par[best] = best; ++g_nlab; }
+-                else best = kMaxLabels - 1;   // see the bound note above
+-            }
+-            g_lbl[y][x] = (int16_t)best;
+         }
+     }
+ 
+@@ -1464,14 +1529,18 @@ void resolve(int band_l, int band_r, int margin)
+     for (int i = 0; i < g_nlab; ++i) { x0[i] = 256; x1[i] = -1; }
+     for (int y = ylo; y <= yhi; ++y) {
+         if (!near[y]) continue;
+-        for (int x = 0; x < 256; ++x) {
+-            const int l = g_lbl[y][x];
+-            if (!l) continue;
+-            const int r = find_root(l);
+-            g_lbl[y][x] = (int16_t)r;
+-            if (!on[y][x]) continue;
+-            if (x < x0[r]) x0[r] = x;
+-            if (x > x1[r]) x1[r] = x;
++        const uint32_t r = reach[y];
++        for (int g = 0; g < 32; ++g) {
++            if (!((r >> g) & 1u)) continue;
++            for (int x = g * 8; x < g * 8 + 8; ++x) {
++                const int l = g_lbl[y][x];
++                if (!l) continue;
++                const int rt = find_root(l);
++                g_lbl[y][x] = (int16_t)rt;
++                if (!on[y][x]) continue;
++                if (x < x0[rt]) x0[rt] = x;
++                if (x > x1[rt]) x1[rt] = x;
++            }
+         }
+     }
+ 
+-- 
+2.55.0.windows.5
+

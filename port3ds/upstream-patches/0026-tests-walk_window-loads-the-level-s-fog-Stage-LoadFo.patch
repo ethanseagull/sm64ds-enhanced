@@ -1,0 +1,56 @@
+From 65492b0ec4a4cc0f76ce289feb5659b577a6ffeb Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 10:25:20 -0700
+Subject: [PATCH] tests: walk_window loads the level's fog (Stage::LoadFog)
+ before its skybox
+
+Stage::InitResources calls LoadFog ahead of LoadSkybox; the PC driver called
+only the second, at boot and on a level change, so the two Fog records at
+Stage+0x96c stayed zero and no level fogged (the 3DS boot had the same gap
+and fogs now). The C-named face is hal/stage_slot0.cpp's, linked into both
+walk_window targets with src/_ZN5Stage7LoadFogEv.cpp (slice_s4_slot0.txt).
+Not built here (no MSVC on the 3DS machine).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/tests/walk_window.cpp | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/port/tests/walk_window.cpp b/port/tests/walk_window.cpp
+index ce8e57db7..2eec369aa 100644
+--- a/port/tests/walk_window.cpp
++++ b/port/tests/walk_window.cpp
+@@ -1009,6 +1009,7 @@ void port_stage_advance_anims(void *self); /* Stage::Render's first block: the
+                                               level's BTA texture animations */
+ void port_stage_render_skybox(void *self); /* the +0x9bc Model, camera-glued */
+ void _ZN5Stage9LoadModelEv(char *self);   /* matched src, slice_gate24 */
++void _ZN5Stage7LoadFogEv(char *self);     /* matched src, hal/stage_slot0.cpp's face */
+ void _ZN5Stage10LoadSkyboxEv(char *self); /* matched src, slice_gate26 */
+ unsigned _ZN5Stage11GetSkyboxIDEv(void);  /* the LVL_Overlay's skybox bits */
+ extern int data_0209f320;                 /* the Stage's ModelComponents */
+@@ -13445,7 +13446,13 @@ int main(void)
+            handle 2040 = data/vrbox/vr01.bmd), news a Model off the game heap
+            and parks it at Stage+0x9bc; port_stage_render_skybox draws it in
+            front of the opaque pass, glued to the camera eye. Id 0 leaves
+-           +0x9bc NULL and both sides no-op, same as the ROM. */
++           +0x9bc NULL and both sides no-op, same as the ROM.
++           Stage::LoadFog first, in InitResources' order: it fills the two
++           Fog records at Stage+0x96c (the level's own and the underwater
++           one) that Stage::RenderFog hands G3X every frame. Without it both
++           stayed zero and no level fogged (the 3DS boot had the same gap:
++           port3ds/game/main_game.cpp). */
++        _ZN5Stage7LoadFogEv(stage);
+         _ZN5Stage10LoadSkyboxEv(stage);
+         printf("skybox loaded by Stage::LoadSkybox, id %u, model %s\n",
+                _ZN5Stage11GetSkyboxIDEv(),
+@@ -16886,6 +16893,7 @@ int main(void)
+                        filePtr back inside one level. */
+                     void *bmd = *(void **)(level_model + 0x04);
+                     level_shift = bmd ? *(int *)bmd : 0;
++                    _ZN5Stage7LoadFogEv(stage);   /* the new level's fog, as at boot */
+                     _ZN5Stage10LoadSkyboxEv(stage);
+                 }
+                 an_pivot_live = 0;        /* do not ease the camera across it */
+-- 
+2.55.0.windows.5
+

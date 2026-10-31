@@ -1,0 +1,167 @@
+From a6db34b1347c86175805c6217dd9f60116fe0d5b Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 23:10:50 -0700
+Subject: [PATCH] ntr: the record as the card uploads it: 16-bit indices, id
+ ranges, the projection kind in the id
+
+GxRecVertex::id carries in bit 15 whether its projection is a perspective one; indices are 16-bit (a recorded frame stops at 0xFFFF vertices); each run carries the lowest and highest matrix id its triangles ride. The 3DS card uploads the record as it is and draws a run that fits its matrix ring as one range.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp           | 42 +++++++++++++++++++++++++++++----------
+ port/ntr/include/ntr/gx.h |  7 ++++++-
+ 2 files changed, 37 insertions(+), 12 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 6bfc01b12..2db742fde 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -1793,6 +1793,7 @@ struct RecMtx {
+ };
+ struct RecRun {
+     uint32_t first;        // its first triangle
++    uint16_t id_lo, id_hi; // the matrix ids its triangles ride
+     GxTriangle st;         // fill_tri_state's answer, for the card
+     const uint32_t *tex_rgba;
+     int tw, th;
+@@ -1816,7 +1817,7 @@ struct Rec {
+     int listed;            // a lean frame's triangles were put in g.tris
+     uint32_t strip_base;   // the record index of g.strip[0]
+     std::vector<RecVtx> v;
+-    std::vector<uint32_t> idx;
++    std::vector<uint16_t> idx;      // a frame holds fewer than 0xFFFF vertices
+     std::vector<RecRun> runs;
+     std::vector<RecMtx> mtx;
+     std::vector<uint32_t> strip;    // lean: the primitive's record indices
+@@ -1865,7 +1866,7 @@ inline void rec_vertex(int16_t x, int16_t y, int16_t z, bool new_id) {
+         /* the frame's first menu-wide question may set the viewport, and in
+            the list's own flow it is asked inside this vertex's project() */
+         (void)menu_wide();
+-        if (R.mtx.size() >= 0xFFFF) { rec_stop(REC_IDS); return; }
++        if (R.mtx.size() >= 0x7FFF) { rec_stop(REC_IDS); return; }
+         RecMtx m;
+         m.pos = g.pos;
+         m.proj = g.proj;
+@@ -1873,16 +1874,30 @@ inline void rec_vertex(int16_t x, int16_t y, int16_t z, bool new_id) {
+         m.sprite = g_menu_sprite;
+         R.mtx.push_back(m);
+     }
++    if (R.v.size() >= 0xFFFF) { rec_stop(REC_IDS); return; }   // 16-bit indices
+     if (g.strip.empty()) R.strip_base = (uint32_t)R.v.size();
+-    R.v.push_back({x, y, z, (uint16_t)(R.mtx.size() - 1), g.color, g.u, g.v});
++    /* the id, and in bit 15 whether its projection is a perspective one (the
++       near-plane rule, ntr/gx.h GxRecVertex) */
++    const Mat &pj = R.mtx.back().proj;
++    const bool persp = pj.m[3] != 0.0f || pj.m[7] != 0.0f || pj.m[11] != 0.0f;
++    const uint16_t id = (uint16_t)((R.mtx.size() - 1) | (persp ? 0x8000u : 0u));
++    R.v.push_back({x, y, z, id, g.color, g.u, g.v});
+ }
+ 
++inline uint32_t rec_id(const RecVtx &v) { return v.id & 0x7FFFu; }
++
+ // One triangle into the record: three record indices, under the run the live
+-// state makes (a new one at the first triangle after a state change).
++// state makes (a new one at the first triangle after a state change), whose
++// id range it widens.
+ inline void rec_push_tri(uint32_t ia, uint32_t ib, uint32_t ic, bool new_run) {
+     Rec &R = g_rec;
++    const uint32_t da = rec_id(R.v[ia]), db = rec_id(R.v[ib]), dc = rec_id(R.v[ic]);
++    const uint32_t lo = da < db ? (da < dc ? da : dc) : (db < dc ? db : dc);
++    const uint32_t hi = da > db ? (da > dc ? da : dc) : (db > dc ? db : dc);
+     if (new_run || R.runs.empty()) {
+         RecRun r{};
++        r.id_lo = (uint16_t)lo;
++        r.id_hi = (uint16_t)hi;
+         r.first = (uint32_t)(R.idx.size() / 3);
+         fill_tri_state(r.st);
+         r.tex_rgba = g.tex_rgba;
+@@ -1894,10 +1909,14 @@ inline void rec_push_tri(uint32_t ia, uint32_t ib, uint32_t ic, bool new_run) {
+         r.poly_attr = g.poly_attr;
+         r.teximage = g_teximage;
+         R.runs.push_back(r);
++    } else {
++        RecRun &r = R.runs.back();
++        if (lo < r.id_lo) r.id_lo = (uint16_t)lo;
++        if (hi > r.id_hi) r.id_hi = (uint16_t)hi;
+     }
+-    R.idx.push_back(ia);
+-    R.idx.push_back(ib);
+-    R.idx.push_back(ic);
++    R.idx.push_back((uint16_t)ia);
++    R.idx.push_back((uint16_t)ib);
++    R.idx.push_back((uint16_t)ic);
+ }
+ 
+ // emit_tri: the three corners must be rows of the strip push_vertex keeps.
+@@ -1924,8 +1943,7 @@ inline void rec_lean_tri(uint32_t a, uint32_t b, uint32_t c) {
+     const bool new_run = g_s5_state_dirty;
+     if (new_run) { ++g_s5_frame[S5_RUNS]; g_s5_state_dirty = false; }
+     const uint32_t last = a > b ? (a > c ? a : c) : (b > c ? b : c);
+-    const Mat &pj = R.mtx[R.v[last].id].proj;
+-    if (pj.m[3] == 0.0f && pj.m[7] == 0.0f && pj.m[11] == 0.0f) g_frame_ortho = true;
++    if (!(R.v[last].id & 0x8000u)) g_frame_ortho = true;   // its projection is constant-w
+     rec_push_tri(a, b, c, new_run);
+ }
+ 
+@@ -2147,7 +2165,7 @@ void rec_materialise(std::vector<GxTriangle> &out) {
+     g.normal_live = 0;
+     for (size_t k = 0; k < R.v.size(); ++k) {
+         const RecVtx &rv = R.v[k];
+-        ride(rv.id);
++        ride((uint16_t)rec_id(rv));
+         g.color = rv.color;
+         g.u = rv.u;
+         g.v = rv.v;
+@@ -2172,7 +2190,7 @@ void rec_materialise(std::vector<GxTriangle> &out) {
+         for (size_t t = run.first; t < end; ++t) {
+             const uint32_t a = R.idx[t * 3], b = R.idx[t * 3 + 1], c = R.idx[t * 3 + 2];
+             const uint32_t last = a > b ? (a > c ? a : c) : (b > c ? b : c);
+-            ride(R.v[last].id);
++            ride((uint16_t)rec_id(R.v[last]));
+             emit_tri(pv[a], pv[b], pv[c], g_raw_dead, g_raw_dead, g_raw_dead);
+         }
+     }
+@@ -3830,6 +3848,8 @@ int gx_take_record(GxRecord &into) {
+         GxRecRun &o = into.runs[r];
+         o.st = R.runs[r].st;
+         o.first = R.runs[r].first;
++        o.id_lo = R.runs[r].id_lo;
++        o.id_hi = R.runs[r].id_hi;
+         o.count = (r + 1 < R.runs.size() ? R.runs[r + 1].first : ntri) - o.first;
+     }
+     const bool mw = menu_wide();
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index ae3329706..82ac9e2d1 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -195,6 +195,10 @@ struct GxGrid {
+ // The triangle each run's corners make, clipped at that plane, is the list's
+ // triangle; each triangle rides the projection of its newest vertex (the
+ // largest index), which is the projection gx.cpp clipped it under.
++// `id` is the vertex's matrix id in bits 0-14 and, in bit 15, whether that
++// id's projection is a perspective one (GxRecMatrix::persp): read as a signed
++// short, an orthographic vertex is >= 0 and a perspective one < 0. idx holds
++// 16-bit indices (a recorded frame has fewer than 0xFFFF vertices).
+ struct GxRecVertex {
+     int16_t x, y, z;
+     uint16_t id;
+@@ -204,6 +208,7 @@ struct GxRecVertex {
+ struct GxRecRun {
+     GxTriangle st;
+     uint32_t first, count;
++    uint16_t id_lo, id_hi;   // the matrix ids its triangles ride, lowest and highest
+ };
+ struct GxRecMatrix {
+     float m[16];
+@@ -211,7 +216,7 @@ struct GxRecMatrix {
+ };
+ struct GxRecord {
+     std::vector<GxRecVertex> v;
+-    std::vector<uint32_t> idx;
++    std::vector<uint16_t> idx;
+     std::vector<GxRecRun> runs;
+     std::vector<GxRecMatrix> mtx;
+ };
+-- 
+2.49.0
+

@@ -1,0 +1,774 @@
+From 3c7d931ec4b3d2335fcc06153139d05859f6a535 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 09:26:29 -0700
+Subject: [PATCH] ntr: the list memo: a display list seen before put into the
+ record whole
+
+A lean record frame's display lists made only of geometry (BEGIN / END,
+the vertices, COLOR, NORMAL, TEXCOORD, NOP) and MTX_RESTORE are kept the
+first time they run (their vertices, triangles, strip and the fields they
+write) and replayed when the same words come with the same entry state:
+only what the list reads before writing it, compared word for word (the
+colour, texels and last vertex; the lighting and the restored slots'
+direction matrices for a NORMAL; the texture matrix for texgen). Its
+MTX_RESTOREs run again (this frame's matrices) and the matrix ids and
+runs are made by the record's own steps. gx_list_begin names a list the
+ROM DMAs in chunks. gx_list_memo(2) runs both ways and compares.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp           | 642 ++++++++++++++++++++++++++++++++++++--
+ port/ntr/include/ntr/gx.h |  14 +
+ 2 files changed, 627 insertions(+), 29 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index ce212458c..9d5b8e99d 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -25,6 +25,7 @@
+ #include <mutex>
+ #include <thread>
+ #include <type_traits>
++#include <unordered_map>
+ #include <utility>
+ #include <vector>
+ 
+@@ -1897,27 +1898,48 @@ void rec_stop(int why) {
+     g_rec.bad = why;
+ }
+ 
++// A new matrix id: the live matrices, viewport and keys (false: the record
++// stopped, too many ids).
++inline bool rec_new_id() {
++    Rec &R = g_rec;
++    /* the frame's first menu-wide question may set the viewport, and in
++       the list's own flow it is asked inside this vertex's project() */
++    (void)menu_wide();
++    if (R.mtx.size() >= 0x7FFF) { rec_stop(REC_IDS); return false; }
++    R.mtx.emplace_back();   // in place: the skinned title face makes ~490 a frame
++    RecMtx &m = R.mtx.back();
++    m.pos = g.pos;
++    m.proj = g.proj;
++    m.vp[0] = g.vp_x; m.vp[1] = g.vp_y; m.vp[2] = g.vp_w; m.vp[3] = g.vp_h;
++    m.sprite = g_menu_sprite;
++    m.src = g_ip_dma_src;
++    m.shape = R.shape;
++    m.vhash = 2166136261u;
++    m.nv = 0;
++    m.first = (uint32_t)R.v.size();
++    m.cs[0] = m.cs[1] = m.cs[2] = 0.0f;
++    m.persp = (m.proj.m[3] != 0.0f || m.proj.m[7] != 0.0f || m.proj.m[11] != 0.0f) ? 1 : 0;
++    return true;
++}
++
++// rec_vertex's per-id statistics (gx_record_id_stats)
++inline void rec_id_stat(RecMtx &m, int16_t x, int16_t y, int16_t z) {
++    uint32_t h = m.vhash;
++    h = (h ^ (uint16_t)x) * 16777619u;
++    h = (h ^ (uint16_t)y) * 16777619u;
++    h = (h ^ (uint16_t)z) * 16777619u;
++    m.vhash = h;
++    m.cs[0] += x;
++    m.cs[1] += y;
++    m.cs[2] += z;
++    ++m.nv;
++}
++
+ // vertex(), before push_vertex: `new_id` is step 5's matrix-dirty flag.
+ inline void rec_vertex(int16_t x, int16_t y, int16_t z, bool new_id) {
+     Rec &R = g_rec;
+     if (new_id || R.mtx.empty()) {
+-        /* the frame's first menu-wide question may set the viewport, and in
+-           the list's own flow it is asked inside this vertex's project() */
+-        (void)menu_wide();
+-        if (R.mtx.size() >= 0x7FFF) { rec_stop(REC_IDS); return; }
+-        R.mtx.emplace_back();   // in place: the skinned title face makes ~490 a frame
+-        RecMtx &m = R.mtx.back();
+-        m.pos = g.pos;
+-        m.proj = g.proj;
+-        m.vp[0] = g.vp_x; m.vp[1] = g.vp_y; m.vp[2] = g.vp_w; m.vp[3] = g.vp_h;
+-        m.sprite = g_menu_sprite;
+-        m.src = g_ip_dma_src;
+-        m.shape = R.shape;
+-        m.vhash = 2166136261u;
+-        m.nv = 0;
+-        m.first = (uint32_t)R.v.size();
+-        m.cs[0] = m.cs[1] = m.cs[2] = 0.0f;
+-        m.persp = (m.proj.m[3] != 0.0f || m.proj.m[7] != 0.0f || m.proj.m[11] != 0.0f) ? 1 : 0;
++        if (!rec_new_id()) return;
+     }
+     R.geom = 1;
+     if (R.v.size() >= 0xFFFF) { rec_stop(REC_IDS); return; }   // 16-bit indices
+@@ -1927,18 +1949,7 @@ inline void rec_vertex(int16_t x, int16_t y, int16_t z, bool new_id) {
+     const bool persp = R.mtx.back().persp != 0;   // its proj's, kept when it was made
+     const uint16_t id = (uint16_t)((R.mtx.size() - 1) | (persp ? 0x8000u : 0u));
+     R.v.push_back({x, y, z, id, g.color, g.u, g.v});
+-    if (g_rec_id_stats) {
+-        RecMtx &m = R.mtx.back();
+-        uint32_t h = m.vhash;
+-        h = (h ^ (uint16_t)x) * 16777619u;
+-        h = (h ^ (uint16_t)y) * 16777619u;
+-        h = (h ^ (uint16_t)z) * 16777619u;
+-        m.vhash = h;
+-        m.cs[0] += x;
+-        m.cs[1] += y;
+-        m.cs[2] += z;
+-        ++m.nv;
+-    }
++    if (g_rec_id_stats) rec_id_stat(R.mtx.back(), x, y, z);
+ }
+ 
+ inline uint32_t rec_id(const RecVtx &v) { return v.id & 0x7FFFu; }
+@@ -2480,9 +2491,88 @@ void mtx_load_log(uint8_t cmd, const uint32_t *p) {
+ 
+ int param_count(uint8_t cmd);   /* defined below; the trap needs it */
+ 
++/* THE LIST MEMO'S CAPTURE (gx_list_memo, at gx_write_fifo_n): while a display
++   list runs the ordinary way to be kept, exec notes each command here: the
++   memo replays only lists of BEGIN / END, the vertices, COLOR, NORMAL,
++   TEXCOORD, NOP and MTX_RESTORE (no state a run keeps), and what of the entry
++   state they read before writing it is what the list's key covers. A model's
++   list picks its bones' matrices with MTX_RESTORE between its vertices: those
++   run again at a replay (the matrices are this frame's), and the list is kept
++   as segments, one after each. */
++enum { LM_R_COLOR = 1, LM_R_UV = 2, LM_R_VXYZ = 4, LM_R_LIGHT = 8, LM_R_TEXC = 16 };
++enum { LM_W_COLOR = 1, LM_W_UV = 2, LM_W_RAW = 4, LM_W_VXYZ = 8, LM_W_PRIM = 16, LM_W_NRM = 32,
++       LM_W_PARITY = 64 };
++const uint8_t kLmCmds[] = {0x00, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x40, 0x41};
++enum { LM_NCMD = sizeof kLmCmds };
++enum { LM_MAX_LIVE = 64 };
++struct LmLive {             // an MTX_RESTORE and where it came
++    uint32_t param;
++    uint32_t v, t;          // the record's vertex and index counts then
++};
++struct LmCap {
++    int on;
++    int bad;          // a command the memo does not replay, or a vertex before BEGIN / END
++    int prim_known;   // a BEGIN or END came: the vertices' primitive is the list's own
++    int bad_cmd;      // the first command it does not replay (-1: none)
++    uint32_t reads, writes;
++    uint32_t cmd_n[LM_NCMD];
++    uint32_t slots;   // the matrix stack slots its MTX_RESTOREs read
++    uint32_t nlive;
++    LmLive live[LM_MAX_LIVE];
++};
++LmCap g_lm;
++void lm_cap_abort();    // gx_write_fifo_n's section: a keeping ends unkept
++void lm_frame_reset();  // gx_reset: nothing open or pending across frames
++
++inline void lm_vertex(bool partial) {
++    LmCap &c = g_lm;
++    if (!c.prim_known) c.bad = 1;
++    if (!(c.writes & LM_W_COLOR)) c.reads |= LM_R_COLOR;
++    if (!(c.writes & LM_W_UV)) c.reads |= LM_R_UV;
++    if (partial && !(c.writes & LM_W_VXYZ)) c.reads |= LM_R_VXYZ;
++    c.writes |= LM_W_VXYZ;
++}
++
++void lm_note(uint8_t cmd, const uint32_t *p) {
++    LmCap &c = g_lm;
++    if (cmd == 0x14) {   // MTX_RESTORE: a live command, in position or position-vector mode
++        if ((g.mode != 1 && g.mode != 2) || c.nlive == LM_MAX_LIVE) {
++            if (!c.bad) c.bad_cmd = cmd;
++            c.bad = 1;
++            return;
++        }
++        c.slots |= 1u << (p[0] & 31);
++        c.live[c.nlive++] = LmLive{p[0], (uint32_t)g_rec.v.size(), (uint32_t)g_rec.idx.size()};
++        return;
++    }
++    int s = 0;
++    while (s < LM_NCMD && kLmCmds[s] != cmd) ++s;
++    if (s == LM_NCMD) {
++        if (!c.bad) c.bad_cmd = cmd;
++        c.bad = 1;
++        return;
++    }
++    ++c.cmd_n[s];
++    switch (cmd) {
++        case 0x20: c.writes |= LM_W_COLOR; break;
++        case 0x21:
++            c.reads |= LM_R_LIGHT;
++            c.writes |= LM_W_COLOR | LM_W_NRM;
++            if (((g_teximage >> 30) & 3) == 2) c.writes |= LM_W_UV;
++            break;
++        case 0x22: c.reads |= LM_R_TEXC; c.writes |= LM_W_UV | LM_W_RAW; break;
++        case 0x23: case 0x24: lm_vertex(false); break;
++        case 0x25: case 0x26: case 0x27: case 0x28: lm_vertex(true); break;
++        case 0x40: c.prim_known = 1; c.writes |= LM_W_PRIM | LM_W_PARITY; break;
++        case 0x41: c.prim_known = 1; c.writes |= LM_W_PRIM; break;
++        default: break;
++    }
++}
++
+ void exec(uint8_t cmd, const uint32_t *p, int np) {
+     (void)np;
+     if (g_ip_rec) ip_push(IPK_CMD, cmd, np, p);
++    if (g_lm.on) lm_note(cmd, p);
+     if ((unsigned)(cmd - 0x16) <= 6u && g_rec.on) rec_cmd(cmd);
+     if (!g_ip_replaying) {
+         ++g_cmd_n[cmd];
+@@ -2933,6 +3023,7 @@ int g_port_have = 0;
+ void gx_stream_note(uint32_t w);
+ int g_stream_hash_on = 1;   // gx_stream_hash_enable
+ void gx_write_fifo(uint32_t word) {
++    if (g_lm.on) lm_cap_abort();
+     ++g_fifo_n;
+     if (g_stream_hash_on) gx_stream_note(word);
+     feed(word);
+@@ -3353,6 +3444,465 @@ void gx_pltt_base(uint32_t v) {
+ static uint32_t g_stream_hash = 2166136261u;
+ void gx_stream_note(uint32_t w) { g_stream_hash = (g_stream_hash ^ w) * 16777619u; }
+ 
++namespace {
++
++void fifo_run(const uint32_t *src, int n);
++
++/* THE LIST MEMO (gx_list_memo; the 3DS port, whose frames are lean records).
++   A course draws the same ~300 display lists every frame, and decoding them
++   (exec, vertex, the strip assembly) was a fifth of an Old 3DS's level frame
++   in Azahar. A list made only of geometry (LmCap) adds to the record what its
++   words and a little of the entry state decide: its vertices (all on one
++   matrix id, the live one or one made at its first vertex), its triangles in
++   order, the strip it leaves, and the state fields it writes. So the first
++   time a list runs it runs the ordinary way and that is kept; the next time
++   it comes with the same words and the same entry state its key covers
++   (only what it reads before writing: the colour, the texels, the last
++   vertex, the lighting for a NORMAL, the texture matrix for texgen), the
++   kept result is put into the record instead, by the record's own steps for
++   what the live state still decides (the matrix id, the triangles' runs).
++   Mode 2 runs both and compares (SM64DS_LIST_MEMO_VERIFY's [lmemo] lines). */
++int g_lm_mode;   // 0 off, 1 on, 2 verify
++uint32_t g_lm_lists, g_lm_hits, g_lm_words_hit, g_lm_bad_verify;
++// why lists were not replayed, since the last report (gx_list_memo_report)
++enum { LMW_SHORT, LMW_NOREC, LMW_MIDCMD, LMW_OTHER, LMW_CMD, LMW_IDS, LMW_EARLY, LMW_KEY, LMW_SKIP,
++       LMW_KEEP, LMW_N };
++uint32_t g_lm_why[LMW_N], g_lm_why_cmd[256];
++// gx_list_begin's list (its first chunk is the next call from there), and a
++// replayed list's chunks still to come
++const uint32_t *g_lm_pend, *g_lm_skip_lo, *g_lm_skip_hi;
++int g_lm_pend_n;
++
++struct LmEntry {
++    uint32_t n = 0;
++    uint8_t ok = 0, tries = 0;
++    uint8_t misses = 0, skip = 0;     // key misses in a row (a lit list that moves), and the backoff
++    uint32_t reads = 0, writes = 0;
++    std::vector<uint32_t> words;
++    std::vector<RecVtx> v;            // the vertices (their id is the live one's at replay)
++    std::vector<uint16_t> tri;        // corners, from the list's first vertex
++    // segment k: MTX_RESTORE live[k - 1] (none for the first), then vertices
++    // seg_v[k] .. seg_v[k + 1] and triangles seg_t[k] .. seg_t[k + 1] (corners)
++    std::vector<uint32_t> live, seg_v, seg_t;
++    uint32_t slots = 0;
++    std::vector<uint32_t> key;        // lm_key's words for the entry state it was kept under
++    std::vector<uint32_t> strip;      // Rec::strip after it, the same way
++    uint32_t strip_base = 0;          // Rec::strip_base after it, the same way
++    uint32_t cmd_n[LM_NCMD] = {};
++    // the fields it writes (LM_W_*), as it leaves them
++    int16_t vx = 0, vy = 0, vz = 0;
++    int prim = -1, normal_live = 0, parity = 0;
++    uint32_t color = 0;
++    float u = 0, v_ = 0, raw_u = 0, raw_v = 0, nrm[3] = {};
++};
++std::unordered_map<const uint32_t *, LmEntry> g_lm_map;
++
++inline void lm_put_words(std::vector<uint32_t> &k, const void *p, size_t bytes) {
++    const uint32_t *w = static_cast<const uint32_t *>(p);
++    k.insert(k.end(), w, w + bytes / 4);
++}
++
++/* The entry state a list of `reads` (restoring `slots`) depends on, as its
++   words: compared whole, not hashed (a word-wise hash let two lightings that
++   differ only in sign bits, which cancel in pairs, look the same). */
++void lm_key(uint32_t reads, uint32_t slots, std::vector<uint32_t> &k) {
++    k.clear();
++    if (reads & LM_R_COLOR) lm_put_words(k, &g.color, 4);
++    if (reads & LM_R_UV) { lm_put_words(k, &g.u, 4); lm_put_words(k, &g.v, 4); }
++    if (reads & LM_R_VXYZ) {
++        const int32_t xyz[3] = {g.vx, g.vy, g.vz};
++        lm_put_words(k, xyz, sizeof xyz);
++    }
++    const uint32_t texgen = (g_teximage >> 30) & 3;
++    if (reads & (LM_R_TEXC | LM_R_LIGHT)) {
++        lm_put_words(k, &texgen, 4);
++        if ((texgen == 1 && (reads & LM_R_TEXC)) || (texgen == 2 && (reads & LM_R_LIGHT)))
++            lm_put_words(k, g.tex.m, sizeof g.tex.m);
++    }
++    if (slots) lm_put_words(k, &g.mode, sizeof g.mode);
++    if (reads & LM_R_LIGHT) {
++        if (texgen == 2) { lm_put_words(k, &g.raw_u, 4); lm_put_words(k, &g.raw_v, 4); }
++        lm_put_words(k, g.vec.m, sizeof(float) * 12);
++        for (uint32_t m = slots; m; m &= m - 1)
++            lm_put_words(k, g.vec_stack[__builtin_ctz(m)].m, sizeof(float) * 12);
++        lm_put_words(k, g.emission, sizeof g.emission);
++        lm_put_words(k, g.diffuse, sizeof g.diffuse);
++        lm_put_words(k, g.ambient, sizeof g.ambient);
++        const uint32_t lmask = (g.poly_attr & 0xFu) | g.light_mask;
++        lm_put_words(k, &lmask, 4);
++        for (int i = 0; i < 4; ++i)
++            if ((lmask >> i) & 1) lm_put_words(k, &g.lights[i], sizeof g.lights[i]);
++    }
++}
++
++/* A list being kept: it may come in chunks (func_0205a290 sends 0x1D8 bytes
++   at a time, the next chunk when the FIFO asks), so the keeping opens at its
++   first and closes after its last; anything else reaching the engine between
++   them ends it unkept. */
++struct LmOpen {
++    LmEntry *e;                       // nullptr: none open
++    const uint32_t *next, *end;       // where the next chunk starts; the list's end
++    uint32_t vbase, ibase;
++    size_t mtx_n;
++    // the entry state a key can hold (what the list reads is known only
++    // after it ran)
++    uint32_t color;
++    float u, v, raw_u, raw_v;
++    int16_t vx, vy, vz;
++    Mat vec;
++};
++LmOpen g_lm_open;
++
++void lm_cap_begin(LmEntry &e, const uint32_t *src, int n) {
++    const Rec &R = g_rec;
++    LmOpen &o = g_lm_open;
++    o.e = &e;
++    o.next = src;
++    o.end = src + n;
++    o.vbase = (uint32_t)R.v.size();
++    o.ibase = (uint32_t)R.idx.size();
++    o.mtx_n = R.mtx.size();
++    o.color = g.color;
++    o.u = g.u; o.v = g.v; o.raw_u = g.raw_u; o.raw_v = g.raw_v;
++    o.vx = g.vx; o.vy = g.vy; o.vz = g.vz;
++    o.vec = g.vec;
++    g_lm = LmCap{};
++    g_lm.bad_cmd = -1;
++    g_lm.on = 1;
++    e.n = (uint32_t)n;
++    e.words.assign(src, src + n);
++    e.ok = 0;
++    ++e.tries;
++}
++
++void lm_cap_abort() {
++    g_lm.on = 0;
++    g_lm_open.e = nullptr;
++}
++
++void lm_frame_reset() {
++    lm_cap_abort();
++    g_lm_pend = g_lm_skip_lo = g_lm_skip_hi = nullptr;
++}
++
++// The list ran whole: keep it if it is one the memo replays.
++void lm_cap_end() {
++    LmOpen &o = g_lm_open;
++    LmEntry &e = *o.e;
++    g_lm.on = 0;
++    o.e = nullptr;
++    Rec &R = g_rec;
++    const uint32_t vbase = o.vbase, ibase = o.ibase;
++    if (g_lm.bad || !R.on || g_queued || g_have) {
++        ++g_lm_why[g_lm.bad ? (g_lm.prim_known ? LMW_CMD : LMW_EARLY) : LMW_IDS];
++        if (g_lm.bad_cmd >= 0) ++g_lm_why_cmd[g_lm.bad_cmd];
++        return;
++    }
++    // the segments; a segment's vertices all on one id, the live one at its
++    // first vertex or one made there (so a replay makes it the same way)
++    e.live.resize(g_lm.nlive);
++    e.seg_v.resize(g_lm.nlive + 2);
++    e.seg_t.resize(g_lm.nlive + 2);
++    e.seg_v[0] = 0;
++    e.seg_t[0] = 0;
++    for (uint32_t k = 0; k < g_lm.nlive; ++k) {
++        e.live[k] = g_lm.live[k].param;
++        e.seg_v[k + 1] = g_lm.live[k].v - vbase;
++        e.seg_t[k + 1] = g_lm.live[k].t - ibase;
++    }
++    e.seg_v[g_lm.nlive + 1] = (uint32_t)R.v.size() - vbase;
++    e.seg_t[g_lm.nlive + 1] = (uint32_t)R.idx.size() - ibase;
++    e.slots = g_lm.slots;
++    size_t ids = o.mtx_n;
++    for (uint32_t k = 0; k + 1 < e.seg_v.size(); ++k) {
++        const uint32_t v0 = vbase + e.seg_v[k], v1 = vbase + e.seg_v[k + 1];
++        if (v0 == v1) continue;
++        const uint32_t id = rec_id(R.v[v0]);
++        if (id == ids) ++ids;   // made at this segment's first vertex
++        else if (!ids || id != ids - 1) { ++g_lm_why[LMW_IDS]; return; }   // not the live one
++        for (uint32_t x = v0; x < v1; ++x)
++            if (rec_id(R.v[x]) != id) { ++g_lm_why[LMW_IDS]; return; }
++    }
++    if (ids != R.mtx.size()) { ++g_lm_why[LMW_IDS]; return; }
++    for (uint32_t k = ibase; k < R.idx.size(); ++k)
++        if (R.idx[k] < vbase) return;
++    for (uint32_t x : R.strip)
++        if (x < vbase) return;
++    e.v.assign(R.v.begin() + vbase, R.v.end());
++    e.tri.resize(R.idx.size() - ibase);
++    for (size_t k = 0; k < e.tri.size(); ++k) e.tri[k] = (uint16_t)(R.idx[ibase + k] - vbase);
++    e.strip.resize(R.strip.size());
++    for (size_t k = 0; k < e.strip.size(); ++k) e.strip[k] = R.strip[k] - vbase;
++    e.strip_base = R.strip_base - vbase;
++    std::memcpy(e.cmd_n, g_lm.cmd_n, sizeof e.cmd_n);
++    e.reads = g_lm.reads;
++    e.writes = g_lm.writes;
++    e.vx = g.vx; e.vy = g.vy; e.vz = g.vz;
++    e.prim = g.prim;
++    e.normal_live = g.normal_live;
++    e.parity = g.strip_parity;
++    e.color = g.color;
++    e.u = g.u; e.v_ = g.v; e.raw_u = g.raw_u; e.raw_v = g.raw_v;
++    std::memcpy(e.nrm, g.nrm, sizeof e.nrm);
++    // the key, from the entry state put back for the moment
++    g.color = o.color; g.u = o.u; g.v = o.v; g.raw_u = o.raw_u; g.raw_v = o.raw_v;
++    g.vx = o.vx; g.vy = o.vy; g.vz = o.vz;
++    const Mat vec_x = g.vec;   // its MTX_RESTOREs moved it
++    g.vec = o.vec;
++    lm_key(e.reads, e.slots, e.key);
++    g.color = e.color; g.u = e.u; g.v = e.v_; g.raw_u = e.raw_u; g.raw_v = e.raw_v;
++    g.vx = e.vx; g.vy = e.vy; g.vz = e.vz;
++    g.vec = vec_x;
++    e.ok = 1;
++}
++
++// The kept list into the record (lm_capture's notes on what is live).
++void lm_replay(const LmEntry &e) {
++    Rec &R = g_rec;
++    const uint32_t vbase = (uint32_t)R.v.size();
++    R.v.reserve(vbase + e.v.size());
++    for (size_t k = 0; k + 1 < e.seg_v.size(); ++k) {
++        if (k) exec(0x14, &e.live[k - 1], 1);   // MTX_RESTORE, with this frame's matrices
++        const uint32_t v0 = e.seg_v[k], v1 = e.seg_v[k + 1];
++        if (v0 != v1) {
++            // vertex(): the segment's first vertex's matrix id
++            const bool new_id = g_s5_mtx_dirty;
++            if (new_id) { ++g_s5_frame[S5_MTX]; g_s5_mtx_dirty = false; }
++            g_s5_frame[S5_VERTS] += v1 - v0;
++            if ((new_id || R.mtx.empty()) && !rec_new_id()) goto state;   // the record stopped
++            R.geom = 1;
++            const uint16_t id =
++                (uint16_t)((R.mtx.size() - 1) | (R.mtx.back().persp ? 0x8000u : 0u));
++            const size_t at = R.v.size();
++            R.v.resize(at + (v1 - v0));
++            RecVtx *out = R.v.data() + at;
++            for (uint32_t x = v0; x < v1; ++x) {
++                *out = e.v[x];
++                out->id = id;
++                ++out;
++            }
++            if (g_rec_id_stats) {
++                RecMtx &m = R.mtx.back();
++                for (uint32_t x = v0; x < v1; ++x) rec_id_stat(m, e.v[x].x, e.v[x].y, e.v[x].z);
++            }
++        }
++        for (uint32_t t = e.seg_t[k]; t < e.seg_t[k + 1]; t += 3)
++            rec_lean_tri(vbase + e.tri[t], vbase + e.tri[t + 1], vbase + e.tri[t + 2]);
++    }
++    if (!e.v.empty()) R.strip_base = vbase + e.strip_base;
++    if (e.writes & (LM_W_PRIM | LM_W_VXYZ)) {
++        R.strip.resize(e.strip.size());
++        for (size_t k = 0; k < e.strip.size(); ++k) R.strip[k] = vbase + e.strip[k];
++    }
++state:
++    if (e.writes & LM_W_VXYZ) { g.vx = e.vx; g.vy = e.vy; g.vz = e.vz; }
++    if (e.writes & LM_W_PRIM) {
++        g.prim = e.prim;
++        g.strip.clear();
++        g.strip_raw.clear();
++    }
++    if (e.writes & LM_W_PARITY) g.strip_parity = e.parity;
++    if (e.writes & (LM_W_COLOR | LM_W_NRM)) { g.color = e.color; g.normal_live = e.normal_live; }
++    if (e.writes & LM_W_NRM) std::memcpy(g.nrm, e.nrm, sizeof e.nrm);
++    if (e.writes & LM_W_UV) { g.u = e.u; g.v = e.v_; }
++    if (e.writes & LM_W_RAW) { g.raw_u = e.raw_u; g.raw_v = e.raw_v; }
++    for (int s = 0; s < LM_NCMD; ++s) g_cmd_n[kLmCmds[s]] += e.cmd_n[s];
++}
++
++// Mode 2: everything the two ways may touch, taken and put back.
++struct LmSnap {
++    size_t nv, ni, nr, nm;
++    RecRun last_run;
++    RecMtx last_mtx;
++    std::vector<uint32_t> strip;
++    uint32_t strip_base;
++    int geom, on, bad;
++    int16_t vx, vy, vz;
++    int prim, normal_live, parity;
++    size_t gstrip, gstrip_raw;
++    uint32_t color;
++    float u, v, raw_u, raw_v, nrm[3];
++    unsigned s5[S5_N];
++    bool mtx_dirty, state_dirty, ortho;
++    uint32_t cmd_n[256];
++    Mat pos, vec;                 // a replay's MTX_RESTOREs set them
++    unsigned restore_mode[4];
++};
++void lm_take(LmSnap &s) {
++    Rec &R = g_rec;
++    s.pos = g.pos; s.vec = g.vec;
++    std::memcpy(s.restore_mode, g_mtx_restore_mode, sizeof s.restore_mode);
++    s.nv = R.v.size(); s.ni = R.idx.size(); s.nr = R.runs.size(); s.nm = R.mtx.size();
++    if (s.nr) s.last_run = R.runs.back();
++    if (s.nm) s.last_mtx = R.mtx.back();
++    s.strip = R.strip;
++    s.strip_base = R.strip_base;
++    s.geom = R.geom; s.on = R.on; s.bad = R.bad;
++    s.vx = g.vx; s.vy = g.vy; s.vz = g.vz;
++    s.prim = g.prim; s.normal_live = g.normal_live; s.parity = g.strip_parity;
++    s.gstrip = g.strip.size(); s.gstrip_raw = g.strip_raw.size();
++    s.color = g.color;
++    s.u = g.u; s.v = g.v; s.raw_u = g.raw_u; s.raw_v = g.raw_v;
++    std::memcpy(s.nrm, g.nrm, sizeof s.nrm);
++    std::memcpy(s.s5, g_s5_frame, sizeof s.s5);
++    s.mtx_dirty = g_s5_mtx_dirty; s.state_dirty = g_s5_state_dirty; s.ortho = g_frame_ortho;
++    std::memcpy(s.cmd_n, g_cmd_n, sizeof s.cmd_n);
++}
++void lm_put(const LmSnap &s) {
++    Rec &R = g_rec;
++    g.pos = s.pos; g.vec = s.vec;
++    std::memcpy(g_mtx_restore_mode, s.restore_mode, sizeof s.restore_mode);
++    R.v.resize(s.nv); R.idx.resize(s.ni); R.runs.resize(s.nr); R.mtx.resize(s.nm);
++    if (s.nr) R.runs.back() = s.last_run;
++    if (s.nm) R.mtx.back() = s.last_mtx;
++    R.strip = s.strip;
++    R.strip_base = s.strip_base;
++    R.geom = s.geom; R.on = s.on; R.bad = s.bad;
++    g.vx = s.vx; g.vy = s.vy; g.vz = s.vz;
++    g.prim = s.prim; g.normal_live = s.normal_live; g.strip_parity = s.parity;
++    g.color = s.color;
++    g.u = s.u; g.v = s.v; g.raw_u = s.raw_u; g.raw_v = s.raw_v;
++    std::memcpy(g.nrm, s.nrm, sizeof s.nrm);
++    std::memcpy(g_s5_frame, s.s5, sizeof s.s5);
++    g_s5_mtx_dirty = s.mtx_dirty; g_s5_state_dirty = s.state_dirty; g_frame_ortho = s.ortho;
++    std::memcpy(g_cmd_n, s.cmd_n, sizeof s.cmd_n);
++}
++// What a way left past `from` (the record's new rows and the live fields).
++struct LmOut {
++    LmSnap s;
++    std::vector<RecVtx> v;
++    std::vector<uint16_t> idx;
++    std::vector<RecRun> runs;
++    std::vector<RecMtx> mtx;
++};
++void lm_out(LmOut &o, const LmSnap &from) {
++    Rec &R = g_rec;
++    lm_take(o.s);
++    o.v.assign(R.v.begin() + from.nv, R.v.end());
++    o.idx.assign(R.idx.begin() + from.ni, R.idx.end());
++    o.runs.assign(R.runs.begin() + (from.nr ? from.nr - 1 : 0), R.runs.end());
++    o.mtx.assign(R.mtx.begin() + (from.nm ? from.nm - 1 : 0), R.mtx.end());
++}
++template <class T> bool lm_same(const std::vector<T> &a, const std::vector<T> &b) {
++    return a.size() == b.size() && (a.empty() || !std::memcmp(a.data(), b.data(), a.size() * sizeof(T)));
++}
++void lm_verify(const LmEntry &e, const uint32_t *src, int n) {
++    static LmSnap pre;
++    static LmOut a, b;
++    lm_take(pre);
++    lm_replay(e);
++    lm_out(a, pre);
++    lm_put(pre);
++    fifo_run(src, n);
++    lm_out(b, pre);
++    const char *what = nullptr;
++    if (!lm_same(a.v, b.v)) what = "vertices";
++    else if (!lm_same(a.idx, b.idx)) what = "triangles";
++    else if (!lm_same(a.runs, b.runs)) what = "runs";
++    else if (!lm_same(a.mtx, b.mtx)) what = "matrix ids";
++    else if (a.s.strip != b.s.strip || a.s.strip_base != b.s.strip_base || a.s.geom != b.s.geom ||
++             a.s.on != b.s.on)
++        what = "strip";
++    else if (a.s.vx != b.s.vx || a.s.vy != b.s.vy || a.s.vz != b.s.vz || a.s.prim != b.s.prim ||
++             a.s.normal_live != b.s.normal_live || a.s.parity != b.s.parity ||
++             a.s.gstrip != b.s.gstrip || a.s.gstrip_raw != b.s.gstrip_raw ||
++             a.s.color != b.s.color || std::memcmp(&a.s.u, &b.s.u, sizeof(float) * 7))
++        what = "state";
++    else if (std::memcmp(a.s.s5, b.s.s5, sizeof a.s.s5) || a.s.mtx_dirty != b.s.mtx_dirty ||
++             a.s.state_dirty != b.s.state_dirty || a.s.ortho != b.s.ortho)
++        what = "counters";
++    else if (std::memcmp(a.s.cmd_n, b.s.cmd_n, sizeof a.s.cmd_n) ||
++             std::memcmp(a.s.restore_mode, b.s.restore_mode, sizeof a.s.restore_mode))
++        what = "census";
++    else if (std::memcmp(&a.s.pos, &b.s.pos, sizeof(Mat)) || std::memcmp(&a.s.vec, &b.s.vec, sizeof(Mat)))
++        what = "matrices";
++    if (what && g_lm_bad_verify++ < 20) {
++        std::printf("[lmemo] MISMATCH (%s): list %p, %d words, %u vertices; reads %x writes %x "
++                    "slots %x live %u; words", what, static_cast<const void *>(src), n,
++                    (unsigned)e.v.size(), (unsigned)e.reads, (unsigned)e.writes,
++                    (unsigned)e.slots, (unsigned)e.live.size());
++        for (int k = 0; k < n && k < 12; ++k) std::printf(" %08x", (unsigned)src[k]);
++        std::printf("\n");
++        for (size_t k = 0; k < a.v.size() && k < b.v.size(); ++k)
++            if (std::memcmp(&a.v[k], &b.v[k], sizeof a.v[k])) {
++                const RecVtx &x = a.v[k], &y = b.v[k];
++                std::printf("[lmemo]   vertex %u of %u/%u: replay %d,%d,%d id %04x c %08x uv %g,%g;"
++                            " decode %d,%d,%d id %04x c %08x uv %g,%g\n",
++                            (unsigned)k, (unsigned)a.v.size(), (unsigned)b.v.size(), x.x, x.y,
++                            x.z, x.id, (unsigned)x.color, x.u, x.v, y.x, y.y, y.z, y.id,
++                            (unsigned)y.color, y.u, y.v);
++                break;
++            }
++    }
++}
++
++// gx_write_fifo_n's way in, at a list's first chunk (`n` the WHOLE list's
++// words): 1 when the list was put into the record here (its chunks are not to
++// run), 0 when the chunk is to run (a keeping may have opened).
++int lm_start(const uint32_t *src, int n) {
++    const Rec &R = g_rec;
++    if (n < 16) { ++g_lm_why[LMW_SHORT]; return 0; }
++    if (!R.on || !R.lean) { ++g_lm_why[LMW_NOREC]; return 0; }
++    if (g_queued || g_have) { ++g_lm_why[LMW_MIDCMD]; return 0; }
++    if (g_ip_rec || g_ip_replaying || g_ip_armed || smooth_lvl() > 0 || mat_log()) {
++        ++g_lm_why[LMW_OTHER];
++        return 0;
++    }
++    ++g_lm_lists;
++    if (g_lm_map.size() > 4096) g_lm_map.clear();
++    LmEntry &e = g_lm_map[src];
++    const bool same = e.n == (uint32_t)n && !std::memcmp(e.words.data(), src, (size_t)n * 4);
++    if (same && e.ok) {
++        static std::vector<uint32_t> key;
++        lm_key(e.reads, e.slots, key);
++        if (key == e.key) {
++            e.misses = 0;
++            ++g_lm_hits;
++            g_lm_words_hit += (uint32_t)n;
++            if (g_lm_mode == 2) lm_verify(e, src, n);
++            else lm_replay(e);
++            return 1;
++        }
++        // a key that keeps changing (a lit model turning) is kept again only
++        // now and then: keeping costs more than the ordinary run
++        ++g_lm_why[LMW_KEY];
++        if (e.misses >= 3 && (++e.skip & 15)) return 0;
++        if (e.misses < 255) ++e.misses;
++    }
++    if (same && !e.ok && e.tries >= 2) { ++g_lm_why[LMW_SKIP]; return 0; }   // not a list it replays
++    ++g_lm_why[LMW_KEEP];
++    if (!same) e.tries = 0;
++    lm_cap_begin(e, src, n);
++    return 0;
++}
++
++}  // namespace
++
++void gx_list_memo(int mode) {
++    g_lm_mode = mode;
++    g_lm_map.clear();
++}
++
++void gx_list_memo_report() {
++    static const char *const names[LMW_N] = {"short", "no-record", "mid-command", "other",
++                                             "command", "ids", "vertex-first", "key", "skipped",
++                                             "kept"};
++    std::printf("[lmemo] not replayed:");
++    for (int i = 0; i < LMW_N; ++i) std::printf(" %s %u", names[i], g_lm_why[i]);
++    std::printf("; commands:");
++    for (int c = 0; c < 256; ++c)
++        if (g_lm_why_cmd[c]) std::printf(" %02x:%u", c, g_lm_why_cmd[c]);
++    std::printf("\n");
++    std::memset(g_lm_why, 0, sizeof g_lm_why);
++    std::memset(g_lm_why_cmd, 0, sizeof g_lm_why_cmd);
++}
++
++void gx_list_memo_stats(uint32_t &lists, uint32_t &hits, uint32_t &words_hit, uint32_t &bad,
++                        bool take) {
++    lists = g_lm_lists; hits = g_lm_hits; words_hit = g_lm_words_hit; bad = g_lm_bad_verify;
++    if (take) g_lm_lists = g_lm_hits = g_lm_words_hit = 0;
++}
++
+ // A run of words pushed at 0x4000400 (a display list copied or DMA'd to the
+ // FIFO, runtime.cpp): gx_write_fifo word by word without a call per word, and
+ // a command whose parameters all sit in the run executes straight off it
+@@ -3366,6 +3916,36 @@ void gx_write_fifo_n(const uint32_t *src, int n)
+         for (int i = 0; i < n; ++i) h = (h ^ src[i]) * 16777619u;
+         g_stream_hash = h;
+     }
++    if (g_lm_mode) {
++        // a replayed list's later chunks: already in the record
++        if (src >= g_lm_skip_lo && src + n <= g_lm_skip_hi) return;
++        g_lm_skip_lo = g_lm_skip_hi = nullptr;
++        if (g_lm_open.e && src != g_lm_open.next) lm_cap_abort();
++        if (!g_lm_open.e) {
++            // the whole list when func_0205a358 named it (gx_list_begin)
++            const int whole = src == g_lm_pend && g_lm_pend_n >= n ? g_lm_pend_n : n;
++            g_lm_pend = nullptr;
++            if (lm_start(src, whole)) {
++                if (whole > n) { g_lm_skip_lo = src + n; g_lm_skip_hi = src + whole; }
++                return;
++            }
++        }
++    }
++    fifo_run(src, n);
++    if (g_lm_open.e) {
++        g_lm_open.next = src + n;
++        if (g_lm_open.next == g_lm_open.end) lm_cap_end();
++    }
++}
++
++void gx_list_begin(const uint32_t *src, int words) {
++    g_lm_pend = src;
++    g_lm_pend_n = words;
++}
++
++namespace {
++void fifo_run(const uint32_t *src, int n)
++{
+     const uint8_t *const pc = g_param_counts.n;
+     int i = 0;
+     while (i < n) {
+@@ -3389,6 +3969,8 @@ void gx_write_fifo_n(const uint32_t *src, int n)
+         feed(src[i++]);
+     }
+ }
++}  // namespace
++
+ uint32_t gx_stream_hash_reset()
+ {
+     const uint32_t h = g_stream_hash;
+@@ -3453,6 +4035,7 @@ void gx_swap_counts(uint32_t &requested, uint32_t &applied,
+ }
+ 
+ void gx_write_port(uint32_t addr, uint32_t value) {
++    if (g_lm.on) lm_cap_abort();
+     ++g_port_n;
+     if (g_stream_hash_on) gx_stream_note(addr ^ value);
+     const uint8_t cmd = static_cast<uint8_t>((addr - 0x04000400u) >> 2);
+@@ -3619,6 +4202,7 @@ static void smooth_trihash_frame() {
+ }
+ 
+ void gx_reset() {
++    lm_frame_reset();
+     per_frame_answers_reset();
+     for (int i = 0; i < S5_N; ++i) {
+         g_s5_sum[i] += g_s5_frame[i];
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index 2d5c6680e..52ec16280 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -276,6 +276,20 @@ void gx_write_port(uint32_t addr, uint32_t value);
+ void gx_write_fifo(uint32_t word);
+ // The same for n words in a row (a display list sent to the FIFO).
+ void gx_write_fifo_n(const uint32_t *src, int n);
++// THE LIST MEMO (gx.cpp, the record's lean frames): 0 off, 1 a display list
++// made only of geometry and seen before with the same entry state puts its
++// kept result into the record instead of decoding again, 2 does both and
++// compares ([lmemo] MISMATCH lines). Setting it empties the memo.
++void gx_list_memo(int mode);
++// Why lists were not replayed since the last call, as one [lmemo] line.
++void gx_list_memo_report();
++// The game is about to send the display list at src (`words` long) to the
++// FIFO, in chunks or whole: the memo keys on the whole list (the 3DS port
++// wraps the ROM's func_0205a358 to say so).
++void gx_list_begin(const uint32_t *src, int words);
++// Lists that came to it, hits and their words, and verify mismatches (ever).
++void gx_list_memo_stats(uint32_t &lists, uint32_t &hits, uint32_t &words_hit, uint32_t &bad,
++                        bool take);
+ 
+ // Reset the command stream, matrix stacks and polygon list.
+ void gx_reset();
+-- 
+2.55.0.windows.5
+

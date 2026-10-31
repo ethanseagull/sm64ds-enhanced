@@ -1,0 +1,111 @@
+From 485a2a19bf738f147b8bdbb48c9659658716054a Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 18:58:18 -0700
+Subject: [PATCH] ntr: the 3DS maps only the DS's video windows; big card files
+ read by range
+
+ntr/io.cpp (SM64DS_HOST_3DS): VRAM is the DS's five windows, each to its
+512 KB step (LCDC to 1 MB, the texture and palette slots hdtex wraps in):
+3 MB of the 9 MB range. A page census over the title and seven levels
+found nothing written outside them.
+
+hal/fs_names.cpp: port_fs_stream_files_over(bytes) makes files of that
+size or more read from the file by range (held open, one at a time)
+instead of kept whole. The 3DS port's Old 3DS path sets 1 MB: the sound
+archive (4.3 MB) is otherwise held twice, here and as hal/sdat's copy.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/fs_names.cpp | 37 ++++++++++++++++++++++++++++++++++++-
+ port/ntr/io.cpp       | 12 ++++++++++++
+ 2 files changed, 48 insertions(+), 1 deletion(-)
+
+diff --git a/port/hal/fs_names.cpp b/port/hal/fs_names.cpp
+index f3971eda2..6b29f892a 100644
+--- a/port/hal/fs_names.cpp
++++ b/port/hal/fs_names.cpp
+@@ -481,6 +481,39 @@ const u8 *img_file(const ImgFile *f, const char *rel)
+     return buf;
+ }
+ 
++/* Files of g_stream_over bytes or more (0: none) are not kept: a read takes
++   its range from the file, held open (one at a time). port_fs_stream_files_over
++   sets it. The 3DS port's Old 3DS path: the sound archive (4.3 MB) is
++   otherwise held twice, here and as hal/sdat's own copy, and the ROM reads it
++   only at a level's load (its banks and wave archives into the sound heap). */
++u32 g_stream_over;
++FILE *g_stream_fp;
++unsigned g_stream_id = ~0u;
++
++void img_read(const ImgFile *f, const char *rel, u32 off, u8 *out, u32 n)
++{
++    if (!g_stream_over || f->stop - f->start < g_stream_over || g_img_bytes[f->id]) {
++        memcpy(out, img_file(f, rel) + off, n);
++        return;
++    }
++    if (g_stream_id != f->id) {
++        char path[520];
++        if (g_stream_fp)
++            fclose(g_stream_fp);
++        snprintf(path, sizeof path, "%s/extracted/dsd/files/%s", asset_root(), rel);
++        g_stream_fp = fopen(path, "rb");
++        g_stream_id = f->id;
++    }
++    if (!g_stream_fp || fseek(g_stream_fp, (long)off, SEEK_SET) != 0 ||
++        fread(out, 1, n, g_stream_fp) != n) {
++        fprintf(stderr, "FATAL: the game read file id %u (%s) at %#x and it is %s: "
++                "the extracted game files are incomplete; extract them again\n",
++                f->id, rel, (unsigned)off, g_stream_fp ? "shorter than the cartridge says" : "missing");
++        fflush(stderr);
++        exit(2);
++    }
++}
++
+ /* hal/fs.cpp hands each modded file here once, at the latch. */
+ void patch_emit(unsigned id, const u8 *bytes, u32 len)
+ {
+@@ -508,6 +541,8 @@ void patch_emit(unsigned id, const u8 *bytes, u32 len)
+ 
+ }  /* anonymous namespace */
+ 
++extern "C" void port_fs_stream_files_over(u32 bytes) { g_stream_over = bytes; }
++
+ extern "C" void port_fs_card_patches(void (*emit)(unsigned, const u8 *, u32));
+ 
+ namespace {
+@@ -785,7 +820,7 @@ void port_nitrofs_rom_read(u32 addr, u32 len, unsigned char *out)
+                         f->start, f->stop);
+             continue;
+         }
+-        memcpy(out + (lo - addr), img_file(f, rel) + (lo - f->start), hi - lo);
++        img_read(f, rel, lo - f->start, out + (lo - addr), hi - lo);
+     }
+ }
+ 
+diff --git a/port/ntr/io.cpp b/port/ntr/io.cpp
+index f7a35e89f..3ac1b0d79 100644
+--- a/port/ntr/io.cpp
++++ b/port/ntr/io.cpp
+@@ -426,7 +426,19 @@ const RegionDef kRegions[] = {
+     {MAIN_BASE,   MAIN_SIZE,   "main memory",             false},
+     {IO_BASE,     IO_SIZE,     "hardware registers",      true },
+     {PLTT_BASE,   PLTT_SIZE,   "palette memory",          true },
++#if defined(SM64DS_HOST_3DS)
++    // The DS's own video windows only, each held to its 512 KB step (the
++    // LCDC window, the texture and palette slots ntr/hdtex.cpp wraps in, to
++    // 1 MB): 3 MB of the range's 9, which an Old 3DS's 64 MB cannot spare.
++    // Nothing writes the rest (a page census over the title and levels).
++    {VRAM_BASE,              0x80000,  "video memory (engine A BG)",  true },
++    {VRAM_BASE + 0x200000u,  0x80000,  "video memory (engine B BG)",  true },
++    {VRAM_BASE + 0x400000u,  0x80000,  "video memory (engine A OBJ)", true },
++    {VRAM_BASE + 0x600000u,  0x80000,  "video memory (engine B OBJ)", true },
++    {VRAM_BASE + 0x800000u,  0x100000, "video memory (LCDC)",         true },
++#else
+     {VRAM_BASE,   VRAM_SIZE,   "video memory",            true },
++#endif
+     {OAM_BASE,    OAM_SIZE,    "sprite memory",           true },
+     {SHARED_BASE, SHARED_SIZE, "the shared system block", true },
+ };
+-- 
+2.55.0.windows.5
+

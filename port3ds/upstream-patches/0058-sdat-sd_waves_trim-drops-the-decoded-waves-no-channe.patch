@@ -1,0 +1,91 @@
+From e2ace0f8a189c90d3eddf8e44f8f887fcc830ca4 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 20:56:29 -0700
+Subject: [PATCH] sdat: sd_waves_trim drops the decoded waves no channel plays
+
+The decoded-wave cache only grew (~0.9 MB a scene on the 3DS port's Old
+3DS). sd_waves_trim frees every wave no active channel reads
+(sd_mix_plays); the caller holds the mixer's lock where it mixes on
+another thread.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/sdat/mixer.cpp |  7 +++++++
+ port/hal/sdat/sdat.cpp  | 17 +++++++++++++++++
+ port/hal/sdat/sdat.h    |  7 +++++++
+ 3 files changed, 31 insertions(+)
+
+diff --git a/port/hal/sdat/mixer.cpp b/port/hal/sdat/mixer.cpp
+index cc11e8f2a..1e45fc613 100644
+--- a/port/hal/sdat/mixer.cpp
++++ b/port/hal/sdat/mixer.cpp
+@@ -343,6 +343,13 @@ void sd_mix_start(int ch, const SdatWave *w, const SdatNote *n,
+ 
+ /* A PSG voice (pulse or noise) is stepped, not interpolated: the hardware
+    channel holds one sample per timer period and the pulse's edges stay edges. */
++int sd_mix_plays(const sd_s16 *pcm)
++{
++    for (int i = 0; i < SD_CHANNELS; ++i)
++        if (g_ch[i].active && g_ch[i].pcm == pcm) return 1;
++    return 0;
++}
++
+ void sd_mix_set_hold(int ch)
+ {
+     if (ch >= 0 && ch < SD_CHANNELS) g_ch[ch].hold = 1;
+diff --git a/port/hal/sdat/sdat.cpp b/port/hal/sdat/sdat.cpp
+index 99c45c21a..8e97da055 100644
+--- a/port/hal/sdat/sdat.cpp
++++ b/port/hal/sdat/sdat.cpp
+@@ -289,6 +289,23 @@ void sd_waves_reset(void)
+     g_waves.clear();
+ }
+ 
++/* The channels hold raw pointers into the cache (sd_mix_start: c.pcm), so a
++   wave goes only when none plays it; one still sounding stays, and the next
++   trim takes it. */
++unsigned long sd_waves_trim(void)
++{
++    unsigned long bytes = 0;
++    for (auto it = g_waves.begin(); it != g_waves.end();) {
++        if (sd_mix_plays(it->second.pcm.data())) {
++            ++it;
++            continue;
++        }
++        bytes += (unsigned long)it->second.pcm.capacity() * sizeof(sd_s16);
++        it = g_waves.erase(it);
++    }
++    return bytes;
++}
++
+ /* Put THIS process's SDAT root back into data_020a5bb8. The global is a hosted
+    DS symbol, so a save state captures and restores it like any other -- but
+    what it holds is a HOST BOOT POINTER (sdat_init's calloc'd root object), not
+diff --git a/port/hal/sdat/sdat.h b/port/hal/sdat/sdat.h
+index 6360cd8ef..04854f6ef 100644
+--- a/port/hal/sdat/sdat.h
++++ b/port/hal/sdat/sdat.h
+@@ -91,6 +91,11 @@ struct SdatWave {
+ // Resolve wave `index` inside a resident SWAR image. Returns 1 on success.
+ int sdat_swar_wave(const sd_u8 *swar, sd_u32 index, SdatWave *out);
+ 
++// Drop the decoded waves no channel is playing (sd_mix_plays), and answer the
++// bytes freed. The cache otherwise only grows: ~0.9 MB a scene on the 3DS
++// port's Old 3DS (64 MB). Whoever mixes on another thread must hold its lock.
++unsigned long sd_waves_trim(void);
++
+ // ---- SBNK ---------------------------------------------------------------
+ 
+ struct SdatNote {
+@@ -129,6 +134,8 @@ int sd_mix_alloc_mask(int priority, unsigned mask);
+ void sd_mix_set_hold(int ch);
+ void sd_mix_start(int ch, const SdatWave *w, const SdatNote *n,
+                   int volume_db10, int pan, double rate, int priority);
++// Whether an active channel reads `pcm` (a wave sd_mix_start was given).
++int sd_mix_plays(const sd_s16 *pcm);
+ // Both take the REASON they are ending the voice. The reason is the whole
+ // point of SM64DS_VOICE_TRACE: a per-frame voice count cannot tell "the note
+ // finished" from "something took the channel away", and that difference is
+-- 
+2.55.0.windows.5
+

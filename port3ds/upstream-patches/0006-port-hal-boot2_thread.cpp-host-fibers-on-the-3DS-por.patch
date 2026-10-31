@@ -1,0 +1,95 @@
+From 9f39f57f5ef541c715ecfe1f5e149c70bc4a5df4 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 04:27:22 -0700
+Subject: [PATCH 06/13] port/hal/boot2_thread.cpp: host fibers on the 3DS port
+ too
+
+The ROM's threads (the card driver's service thread, the idle loop) run on
+host fibers; that arm was _WIN32-only, so on the New 3DS a thread the ROM
+created was never adopted and its reschedule spun. PORT_HOST_FIBERS enables
+the same arm for SM64DS_HOST_3DS, over the port's compat fiber API.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/boot2_thread.cpp | 23 ++++++++++++++++-------
+ 1 file changed, 16 insertions(+), 7 deletions(-)
+
+diff --git a/port/hal/boot2_thread.cpp b/port/hal/boot2_thread.cpp
+index ef553884b..76943bf51 100644
+--- a/port/hal/boot2_thread.cpp
++++ b/port/hal/boot2_thread.cpp
+@@ -254,7 +254,16 @@
+ #include "ntr/rt.h"
+ #include "os_thread.h"
+ 
+-#if defined(_WIN32)
++/* Host fibers carry the ROM's threads: Win32's, or on the New 3DS the
++   port's compat ones (port3ds/compat: the same API over an ARM context
++   switch). */
++#if defined(_WIN32) || defined(SM64DS_HOST_3DS)
++#define PORT_HOST_FIBERS 1
++#else
++#define PORT_HOST_FIBERS 0
++#endif
++
++#if PORT_HOST_FIBERS
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+ #endif
+@@ -547,7 +556,7 @@ FiberSlot *slot_seat(RomThread *t, void (*entry)()) {
+ // is the handle afterwards. ConvertFiberToThread is never called: undoing the
+ // conversion under a suspended game fiber would strand it.
+ void *host_current_fiber() {
+-#if defined(_WIN32)
++#if PORT_HOST_FIBERS
+     void *f = ConvertThreadToFiber(nullptr);
+     if (f) return f;
+     // Already one -- rt_run converts the thread itself. Asking the error code
+@@ -559,7 +568,7 @@ void *host_current_fiber() {
+ #endif
+ }
+ 
+-#if defined(_WIN32)
++#if PORT_HOST_FIBERS
+ void CALLBACK thread_trampoline(void *p) {
+     FiberSlot *s = static_cast<FiberSlot *>(p);
+     ++g_stat.entered;
+@@ -676,7 +685,7 @@ FiberSlot *adopt_created(RomThread *t) {
+ void thread_boot() {
+     if (g_booted) return;
+     g_booted = true;
+-#if defined(_WIN32)
++#if PORT_HOST_FIBERS
+     g_owner_tid = GetCurrentThreadId();
+ #endif
+ 
+@@ -918,7 +927,7 @@ int ARMSaveContext(void *ctx) {
+         std::fflush(stderr);
+         return 1;                       // back the reschedule out, do not guess
+     }
+-#if defined(_WIN32)
++#if PORT_HOST_FIBERS
+     // func_02057f54 only ever saves the thread it is running on, so the fiber
+     // executing right now IS this thread's context. Asking the OS rather than
+     // trusting the slot also catches the one way the two could disagree.
+@@ -955,7 +964,7 @@ void ARMRestoreContext(void *ctx) {
+     RomThread *to = static_cast<RomThread *>(ctx);
+     RomThread *from = g_running;
+     FiberSlot *ts = slot_of(to);
+-#if defined(_WIN32)
++#if PORT_HOST_FIBERS
+     // A context this file has not seen is a thread src/func_02058200.c made
+     // while nobody was watching, which is the ordinary case now: the card
+     // driver's own bring-up creates one. Adopt it off its record, or refuse it
+@@ -1048,7 +1057,7 @@ void ARMRestoreContext(void *ctx) {
+             return;
+         }
+     }
+-#if defined(_WIN32)
++#if PORT_HOST_FIBERS
+     if (GetCurrentThreadId() != g_owner_tid) {
+         ++g_stat.wrong_thread;
+         std::fprintf(stderr, "[thr] ARMRestoreContext from OS thread %lu, the "
+-- 
+2.55.0.windows.5
+

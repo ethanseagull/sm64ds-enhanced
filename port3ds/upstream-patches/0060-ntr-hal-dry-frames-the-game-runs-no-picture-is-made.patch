@@ -1,0 +1,163 @@
+From b1048fdfd0a25ff7e4e2da4437a76cf69a2b694a Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 24 Oct 2026 22:07:36 -0700
+Subject: [PATCH] ntr/hal: dry frames: the game runs, no picture is made
+
+For a host's frame skip (the 3DS port's Old 3DS dry ticks), two switches
+a host sets for a frame whose picture will not be shown:
+
+- gx_frame_dry: every command still runs (the matrices, the position and
+  vector tests and GXSTAT the game reads back stay exact), but a list the
+  memo would replay applies only what it leaves in the engine's state
+  (lm_replay_state, split out of lm_replay; its live MTX_RESTOREs and a
+  relit list's COLORs and NORMALs still run), not its vertices and
+  triangles.
+- port_message_composite_dry: engine A's path runs the ROM's beat, the OAM
+  upload and the register publishes, and draws nothing.
+
+The 3DS port, Azahar, Old 3DS mode: levels 1, 2 and 6 with a scripted run
+and every other tick dry play the same as without (31 [ltrace] lines and
+the final position equal after 900 frames).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 10 +++++++
+ port/ntr/gx.cpp                 | 47 ++++++++++++++++++++++-----------
+ port/ntr/include/ntr/gx.h       |  7 +++++
+ 3 files changed, 49 insertions(+), 15 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index 9a3741f1b..d462d50a7 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -3849,6 +3849,11 @@ void memo_finish()
+ // Rasterise engine A's 2D layers into the DS 256x192 hit buffer, then composite
+ // the covered pixels over the host 3D framebuffer (scaled by integer factor).
+ // Called from walk_window right after gx_render and before the fade composite.
++/* Set by a host for a frame whose picture will not be shown (the 3DS port's
++   dry frames): the engine A path runs the ROM's beat and publishes only. */
++extern "C" int port_message_composite_dry;
++int port_message_composite_dry;
++
+ extern "C" void port_message_composite_engine_a(void *fbp)
+ {
+     ntr::Framebuffer &fb = *reinterpret_cast<ntr::Framebuffer *>(fbp);
+@@ -3995,6 +4000,11 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+         extern unsigned char data_0209d45c;
+         enga_layer_regs(dispcnt, (unsigned)data_0209d45c);
+     }
++    /* A DRY FRAME (the 3DS port's frame skip, port_message_composite_dry):
++       the beat, the OAM upload and the publishes above are the ROM's and have
++       run; the picture is not wanted, so nothing is drawn (as a forced blank
++       below draws nothing). */
++    if (port_message_composite_dry) return;
+     const bool forced_blank = (dispcnt >> 7) & 1;
+ 
+     /* THE PAUSE MENU COMPOSED ONCE (g_memo): the same inputs as the recorded
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index def45ebe2..adee6f71b 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -3473,6 +3473,7 @@ void fifo_run(const uint32_t *src, int n);
+    what the live state still decides (the matrix id, the triangles' runs).
+    Mode 2 runs both and compares (SM64DS_LIST_MEMO_VERIFY's [lmemo] lines). */
+ int g_lm_mode;   // 0 off, 1 on, 2 verify
++int g_lm_dry;    // gx_frame_dry: a hit applies its state only (lm_replay_state)
+ uint32_t g_lm_lists, g_lm_hits, g_lm_words_hit, g_lm_bad_verify;
+ // why lists were not replayed, since the last report (gx_list_memo_report)
+ enum { LMW_SHORT, LMW_NOREC, LMW_MIDCMD, LMW_OTHER, LMW_CMD, LMW_IDS, LMW_EARLY, LMW_KEY, LMW_SKIP,
+@@ -3699,6 +3700,32 @@ void lm_cap_end() {
+     e.ok = 1;
+ }
+ 
++// What the kept list leaves in the engine's state (lm_replay's tail).
++void lm_replay_state(const LmEntry &e) {
++    if (e.writes & LM_W_VXYZ) { g.vx = e.vx; g.vy = e.vy; g.vz = e.vz; }
++    if (e.writes & LM_W_PRIM) {
++        g.prim = e.prim;
++        g.strip.clear();
++        g.strip_raw.clear();
++    }
++    if (e.writes & LM_W_PARITY) g.strip_parity = e.parity;
++    if (!e.relit) {   // a relit list's COLORs and NORMALs ran
++        if (e.writes & (LM_W_COLOR | LM_W_NRM)) { g.color = e.color; g.normal_live = e.normal_live; }
++        if (e.writes & LM_W_NRM) std::memcpy(g.nrm, e.nrm, sizeof e.nrm);
++    }
++    if (e.writes & LM_W_UV) { g.u = e.u; g.v = e.v_; }
++    if (e.writes & LM_W_RAW) { g.raw_u = e.raw_u; g.raw_v = e.raw_v; }
++    for (int s = 0; s < LM_NCMD; ++s) g_cmd_n[kLmCmds[s]] += e.cmd_n[s];
++}
++
++// A dry frame's replay (gx_frame_dry): the live commands (MTX_RESTORE, a relit
++// list's COLORs and NORMALs) run, as they change what later commands and the
++// game's reads see; the vertices and triangles stay out of the record.
++void lm_replay_dry(const LmEntry &e) {
++    for (size_t k = 1; k + 1 < e.seg_v.size(); ++k) exec(e.live_cmd[k - 1], &e.live[k - 1], 1);
++    lm_replay_state(e);
++}
++
+ // The kept list into the record (lm_capture's notes on what is live).
+ void lm_replay(const LmEntry &e) {
+     Rec &R = g_rec;
+@@ -3772,20 +3799,7 @@ void lm_replay(const LmEntry &e) {
+         for (size_t k = 0; k < e.strip.size(); ++k) R.strip[k] = vbase + e.strip[k];
+     }
+ state:
+-    if (e.writes & LM_W_VXYZ) { g.vx = e.vx; g.vy = e.vy; g.vz = e.vz; }
+-    if (e.writes & LM_W_PRIM) {
+-        g.prim = e.prim;
+-        g.strip.clear();
+-        g.strip_raw.clear();
+-    }
+-    if (e.writes & LM_W_PARITY) g.strip_parity = e.parity;
+-    if (!e.relit) {   // a relit list's COLORs and NORMALs ran
+-        if (e.writes & (LM_W_COLOR | LM_W_NRM)) { g.color = e.color; g.normal_live = e.normal_live; }
+-        if (e.writes & LM_W_NRM) std::memcpy(g.nrm, e.nrm, sizeof e.nrm);
+-    }
+-    if (e.writes & LM_W_UV) { g.u = e.u; g.v = e.v_; }
+-    if (e.writes & LM_W_RAW) { g.raw_u = e.raw_u; g.raw_v = e.raw_v; }
+-    for (int s = 0; s < LM_NCMD; ++s) g_cmd_n[kLmCmds[s]] += e.cmd_n[s];
++    lm_replay_state(e);
+ }
+ 
+ // Mode 2: everything the two ways may touch, taken and put back.
+@@ -3939,7 +3953,8 @@ int lm_start(const uint32_t *src, int n) {
+             e.misses = 0;
+             ++g_lm_hits;
+             g_lm_words_hit += (uint32_t)n;
+-            if (g_lm_mode == 2) lm_verify(e, src, n);
++            if (g_lm_dry) lm_replay_dry(e);
++            else if (g_lm_mode == 2) lm_verify(e, src, n);
+             else lm_replay(e);
+             return 1;
+         }
+@@ -3963,6 +3978,8 @@ void gx_list_memo(int mode) {
+     g_lm_map.clear();
+ }
+ 
++void gx_frame_dry(int on) { g_lm_dry = on ? 1 : 0; }
++
+ void gx_list_memo_report() {
+     static const char *const names[LMW_N] = {"short", "no-record", "mid-command", "other",
+                                              "command", "ids", "vertex-first", "key", "skipped",
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index 52ec16280..814d404f7 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -290,6 +290,13 @@ void gx_list_begin(const uint32_t *src, int words);
+ // Lists that came to it, hits and their words, and verify mismatches (ever).
+ void gx_list_memo_stats(uint32_t &lists, uint32_t &hits, uint32_t &words_hit, uint32_t &bad,
+                         bool take);
++// A DRY FRAME (the 3DS port's frame skip): every command still runs as the
++// game sends it, so what the game reads back (the matrices, the position and
++// vector tests, GXSTAT) is exact, but a list the memo would replay applies
++// only what it leaves in the engine's state -- its vertices and triangles,
++// which nobody will draw, are not put into the record. Set after gx_reset,
++// for that frame; the frame's record is not to be taken.
++void gx_frame_dry(int on);
+ 
+ // Reset the command stream, matrix stacks and polygon list.
+ void gx_reset();
+-- 
+2.55.0.windows.5
+

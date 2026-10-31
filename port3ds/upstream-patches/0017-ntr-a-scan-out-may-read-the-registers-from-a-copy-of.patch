@@ -1,0 +1,242 @@
+From 7b35d84d5344803a5ddd6e96ee35b828e482e2c3 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 21:08:04 -0700
+Subject: [PATCH] ntr: a scan-out may read the registers from a copy of the I/O
+ page
+
+ppu_sub_io_snapshot names, per thread, a copy of 0x04000000..0x04001FFF
+for the engine B scan-out's register reads (reg8/reg16/reg32); VRAM, OAM
+and palette reads are unchanged. The 3DS port scans engine B out on its
+second core beside the next tick, while the game thread writes that
+frame's registers.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/include/ntr/ppu.h |  7 +++
+ port/ntr/ppu_sub.cpp       | 87 +++++++++++++++++++++++++-------------
+ 2 files changed, 65 insertions(+), 29 deletions(-)
+
+diff --git a/port/ntr/include/ntr/ppu.h b/port/ntr/include/ntr/ppu.h
+index 3237011b1..902f2f56a 100644
+--- a/port/ntr/include/ntr/ppu.h
++++ b/port/ntr/include/ntr/ppu.h
+@@ -411,6 +411,13 @@ long ppu_sub_obj_veto_count(void);
+  * is the behaviour this file shipped with.  */
+ void ppu_sub_set_bg_suppress(uint32_t mask);
+ 
++/* The calling thread's scan-outs read the engines' REGISTERS (the I/O page,
++   0x04000000..0x04001FFF, 8 KB) from `page`, a copy of it, instead of the
++   live page; null for the live page, which every thread starts with. VRAM,
++   OAM and palette reads are not affected. For a scan-out on another core
++   while the game thread writes the next frame's registers (the 3DS port). */
++void ppu_sub_io_snapshot(const void *page);
++
+ /* ASSET1 (run menu1): ENGINE B DRAWS ONLY SOME OAM ENTRIES. mask4 is a 128-bit set (bit i of word i / 32 is OAM entry i);
+    an entry outside it is skipped exactly as the camera-button veto skips one (obj_decide's skip[], so the scan-out cache
+    and the reference raster agree). Null = every entry, the behaviour this file shipped with. Read-only on the ROM's OAM;
+diff --git a/port/ntr/ppu_sub.cpp b/port/ntr/ppu_sub.cpp
+index e6e1dbc42..846a603b4 100644
+--- a/port/ntr/ppu_sub.cpp
++++ b/port/ntr/ppu_sub.cpp
+@@ -130,6 +130,30 @@ inline uint16_t rd16(uint32_t a) { return *reinterpret_cast<volatile uint16_t *>
+ inline uint32_t rd32(uint32_t a) { return *reinterpret_cast<volatile uint32_t *>(a); }
+ inline uint8_t rd8(uint32_t a) { return *reinterpret_cast<volatile uint8_t *>(a); }
+ 
++/* THE REGISTERS A SCAN-OUT READS (the 3DS port). A thread may name a copy of
++   the I/O page (0x04000000..0x04001FFF) for its reads of the engines'
++   registers to come from instead of the live page, so a scan-out can run on
++   another core while the game thread carries on writing the registers for its
++   next frame (port3ds/game/sub_async.cpp, ppu_sub_io_snapshot). Only the
++   register reads go through these three; VRAM, OAM and palette reads stay on
++   rd8/rd16/rd32. Null, which every thread starts with, is the live page. */
++thread_local const uint8_t *t_io_snap = nullptr;
++inline uint16_t reg16(uint32_t a)
++{
++    const uint8_t *s = t_io_snap;
++    return s ? *reinterpret_cast<const uint16_t *>(s + (a - 0x04000000u)) : rd16(a);
++}
++inline uint32_t reg32(uint32_t a)
++{
++    const uint8_t *s = t_io_snap;
++    return s ? *reinterpret_cast<const uint32_t *>(s + (a - 0x04000000u)) : rd32(a);
++}
++inline uint8_t reg8(uint32_t a)
++{
++    const uint8_t *s = t_io_snap;
++    return s ? s[a - 0x04000000u] : rd8(a);
++}
++
+ /* THE PER-PIXEL HELPERS ARE FORCED INLINE (lane TWOD). cl kept bgr555 and
+    tile_px as real calls inside the scan-out's per-pixel loops (a sampling
+    profile of the bottom screen put a fifth of its time in the two calls).
+@@ -194,7 +218,7 @@ void read_bg(BgLayer &c, int bg, uint32_t dispcnt) {
+         return;
+     BgKind kind = (BgKind)kModeKinds[mode][bg];
+ 
+-    const uint16_t cnt = rd16(kRegBase + 0x08 + bg * 2);
++    const uint16_t cnt = reg16(kRegBase + 0x08 + bg * 2);
+     c.prio = cnt & 3;
+     c.bpp8 = (cnt >> 7) & 1;
+ 
+@@ -231,12 +255,12 @@ void read_bg(BgLayer &c, int bg, uint32_t dispcnt) {
+         c.map_h = kBmpH[sz];
+         c.wrap = (cnt >> 13) & 1;
+         const uint32_t ab = kRegBase + 0x20 + (bg - 2) * 0x10;
+-        c.pa = (int16_t)rd16(ab + 0);
+-        c.pb = (int16_t)rd16(ab + 2);
+-        c.pc = (int16_t)rd16(ab + 4);
+-        c.pd = (int16_t)rd16(ab + 6);
+-        c.refx = (int)(rd32(ab + 8) << 4) >> 4;
+-        c.refy = (int)(rd32(ab + 12) << 4) >> 4;
++        c.pa = (int16_t)reg16(ab + 0);
++        c.pb = (int16_t)reg16(ab + 2);
++        c.pc = (int16_t)reg16(ab + 4);
++        c.pd = (int16_t)reg16(ab + 6);
++        c.refx = (int)(reg32(ab + 8) << 4) >> 4;
++        c.refy = (int)(reg32(ab + 12) << 4) >> 4;
+         /* NO EXTENDED PALETTE. DISPCNT bit 30 arms them for 256-colour
+            TILE BGs; a bitmap has no per-tile palette field to select a slot
+            with, and the direct-colour arm has no palette at all. */
+@@ -246,20 +270,20 @@ void read_bg(BgLayer &c, int bg, uint32_t dispcnt) {
+     if (kind == BG_TEXT) {
+         c.map_w = (sz & 1) ? 64 : 32;
+         c.map_h = (sz & 2) ? 64 : 32;
+-        c.hofs = rd16(kRegBase + 0x10 + bg * 4) & 0x1FF;
+-        c.vofs = rd16(kRegBase + 0x12 + bg * 4) & 0x1FF;
++        c.hofs = reg16(kRegBase + 0x10 + bg * 4) & 0x1FF;
++        c.vofs = reg16(kRegBase + 0x12 + bg * 4) & 0x1FF;
+     } else {
+         c.map_w = c.map_h = 128 << sz;   // 128 / 256 / 512 / 1024 pixels
+         c.wrap = (cnt >> 13) & 1;
+         // Affine registers: BG2 at 0x20, BG3 at 0x30 (engine-relative).
+         const uint32_t ab = kRegBase + 0x20 + (bg - 2) * 0x10;
+-        c.pa = (int16_t)rd16(ab + 0);
+-        c.pb = (int16_t)rd16(ab + 2);
+-        c.pc = (int16_t)rd16(ab + 4);
+-        c.pd = (int16_t)rd16(ab + 6);
++        c.pa = (int16_t)reg16(ab + 0);
++        c.pb = (int16_t)reg16(ab + 2);
++        c.pc = (int16_t)reg16(ab + 4);
++        c.pd = (int16_t)reg16(ab + 6);
+         // BGxX/BGxY are 28-bit signed 20.8 values.
+-        c.refx = (int)(rd32(ab + 8) << 4) >> 4;
+-        c.refy = (int)(rd32(ab + 12) << 4) >> 4;
++        c.refx = (int)(reg32(ab + 8) << 4) >> 4;
++        c.refy = (int)(reg32(ab + 12) << 4) >> 4;
+         // Extended affine with 16-bit entries uses 8bpp tiles whatever bit 7
+         // said; bit 7 selected bitmap-vs-map, and we rejected bitmap above.
+         if (kind == BG_EXT_AFFINE)
+@@ -838,10 +862,10 @@ void read_windows(uint32_t dispcnt, Windows &w) {
+     // window arms the whole unit exactly as the two rectangles do.
+     w.any = w.on[0] || w.on[1] || w.obj_on;
+     if (!w.any) return;
+-    w.obj_in = (rd16(kRegBase + 0x4A) >> 8) & 0x3F;
++    w.obj_in = (reg16(kRegBase + 0x4A) >> 8) & 0x3F;
+     for (int i = 0; i < 2; ++i) {
+-        const uint16_t hh = rd16(kRegBase + 0x40 + i * 2);
+-        const uint16_t vv = rd16(kRegBase + 0x44 + i * 2);
++        const uint16_t hh = reg16(kRegBase + 0x40 + i * 2);
++        const uint16_t vv = reg16(kRegBase + 0x44 + i * 2);
+         w.x1[i] = hh >> 8;
+         w.x2[i] = hh & 0xFF;
+         w.y1[i] = vv >> 8;
+@@ -852,10 +876,10 @@ void read_windows(uint32_t dispcnt, Windows &w) {
+         if (w.x2[i] <= w.x1[i]) w.x2[i] = 256;
+         if (w.y2[i] <= w.y1[i]) w.y2[i] = 192;
+     }
+-    const uint16_t winin = rd16(kRegBase + 0x48);
++    const uint16_t winin = reg16(kRegBase + 0x48);
+     w.in[0] = winin & 0x3F;
+     w.in[1] = (winin >> 8) & 0x3F;
+-    w.out = rd16(kRegBase + 0x4A) & 0x3F;
++    w.out = reg16(kRegBase + 0x4A) & 0x3F;
+     /* A dWipe_c-style wipe programs the horizontal edges per scanline from
+        its HBlank handler (func_0202f2c4); read above, the rectangle is only
+        the last line's. Take every line's instead, and walk each the way the
+@@ -953,14 +977,14 @@ struct Blend {
+ inline Blend read_blend() {
+     Blend b;
+     b.off = blend_off_env();
+-    const uint16_t cnt = rd16(kRegBase + 0x50);
+-    const uint16_t alpha = rd16(kRegBase + 0x52);
++    const uint16_t cnt = reg16(kRegBase + 0x50);
++    const uint16_t alpha = reg16(kRegBase + 0x52);
+     b.mode = (cnt >> 6) & 3;
+     b.first = cnt & 0x3F;
+     b.second = (cnt >> 8) & 0x3F;
+     b.eva = alpha & 0x1F; if (b.eva > 16) b.eva = 16;
+     b.evb = (alpha >> 8) & 0x1F; if (b.evb > 16) b.evb = 16;
+-    b.evy = rd16(kRegBase + 0x54) & 0x1F; if (b.evy > 16) b.evy = 16;
++    b.evy = reg16(kRegBase + 0x54) & 0x1F; if (b.evy > 16) b.evy = 16;
+     return b;
+ }
+ 
+@@ -1039,7 +1063,7 @@ void scan_ref(SubFramebuffer &fb, uint32_t dispcnt, const uint8_t *skip,
+ 
+     Bright br;
+     {
+-        const uint16_t mb = rd16(kRegBase + 0x6C);
++        const uint16_t mb = reg16(kRegBase + 0x6C);
+         br.factor = mb & 0x1F;
+         if (br.factor > 16) br.factor = 16;
+         br.mode = (mb >> 14) & 3;
+@@ -1228,7 +1252,7 @@ void scan_fast(SubFramebuffer &fb, uint32_t dispcnt, const uint8_t *skip,
+ 
+     Bright br;
+     {
+-        const uint16_t mb = rd16(kRegBase + 0x6C);
++        const uint16_t mb = reg16(kRegBase + 0x6C);
+         br.factor = mb & 0x1F;
+         if (br.factor > 16) br.factor = 16;
+         br.mode = (mb >> 14) & 3;
+@@ -1525,7 +1549,7 @@ void scan_key(ScanKey &k, uint32_t dispcnt, const uint8_t *skip)
+     std::memset(&k, 0, sizeof k);
+     k.dispcnt = dispcnt;
+     k.oam_src = g_oam_src_b;
+-    for (int i = 0; i < 0x70; ++i) k.regs[i] = rd8(kRegBase + i);
++    for (int i = 0; i < 0x70; ++i) k.regs[i] = reg8(kRegBase + i);
+     std::memcpy(k.skip, skip, sizeof k.skip);
+     const uint32_t *rows = nullptr;
+     if (ntr::rt_window_rows(1, &rows)) {
+@@ -1709,7 +1733,7 @@ void ppu_scanout_sub(SubFramebuffer &fb)
+        enable bits: nothing here can turn a layer on that the game turned off.
+        The register itself is not written, so the ROM reads back exactly what
+        it wrote. See ppu_sub_set_bg_suppress. */
+-    const uint32_t dispcnt = rd32(kRegBase) & ~g_bg_suppress;
++    const uint32_t dispcnt = reg32(kRegBase) & ~g_bg_suppress;
+     uint8_t skip[128];
+     const bool shown = ((dispcnt >> 16) & 3) != 0 && !((dispcnt >> 7) & 1);
+     if (shown)
+@@ -1783,6 +1807,11 @@ void ppu_sub_set_bg_suppress(uint32_t mask)
+     g_bg_suppress = mask;
+ }
+ 
++void ppu_sub_io_snapshot(const void *page)
++{
++    t_io_snap = static_cast<const uint8_t *>(page);
++}
++
+ void ppu_sub_set_obj_select(const uint32_t *mask4)
+ {
+     g_obj_sel_on = mask4 ? 1 : 0;
+@@ -3309,7 +3338,7 @@ struct BandTexels {
+ int band_texels(const BandEngine &e, uint16_t a0, uint16_t a1, uint16_t a2,
+                 const BandEntry &d, BandTexels &o)
+ {
+-    const uint32_t dispcnt = rd32(e.reg);
++    const uint32_t dispcnt = reg32(e.reg);
+     if (!((dispcnt >> 12) & 1)) return 0;            // OBJ layer off
+     o.vram = e.vram;
+     o.pltt = e.pltt;
+@@ -3486,7 +3515,7 @@ void band_raster_engine(BandPixel *band, int gap_ds, const BandEngine &e,
+                         int trace = -1, const char *tag = "gappeek",
+                         int split = -1, int k0 = 0, int k1 = 1 << 24)
+ {
+-    if (!((rd32(e.reg) >> 12) & 1)) return;          // OBJ layer off
++    if (!((reg32(e.reg) >> 12) & 1)) return;          // OBJ layer off
+     if (trace < 0) trace = band_trace_frames();
+     for (int i = 127; i >= 0; --i) {
+         const uint16_t a0 = band_oam16(e, i * 8u);
+-- 
+2.49.0
+

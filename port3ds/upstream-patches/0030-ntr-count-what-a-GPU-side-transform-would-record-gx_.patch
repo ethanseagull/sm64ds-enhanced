@@ -1,0 +1,141 @@
+From d2e00c02c192f46308977f4c6683075801bee1b8 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 21:13:53 -0700
+Subject: [PATCH] ntr: count what a GPU-side transform would record
+ (gx_step5_counts)
+
+Per frame: the vertices, triangles, state runs and matrix ids (a vertex after the position or projection matrix or the viewport changed). Only counted; the 3DS port prints them as [perf] gx_record to size its step 5 (the DS transform on the PICA).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp           | 41 +++++++++++++++++++++++++++++++++++++++
+ port/ntr/include/ntr/gx.h |  5 +++++
+ 2 files changed, 46 insertions(+)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 2f8a82135..48908caaf 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -608,6 +608,16 @@ void per_frame_answers_reset() {
+     g_smooth_lvl = -1;
+ }
+ 
++/* WHAT A GPU-SIDE TRANSFORM WOULD RECORD, COUNTED (the 3DS port's step 5,
++   port3ds 3ds-port-plan.md "STEP 5"): per frame, the vertices, the triangles,
++   the state runs (a triangle after a POLYGON_ATTR, TEXIMAGE_PARAM, PLTT_BASE
++   or bind) and the matrix ids (a vertex after the current position or
++   projection matrix or the viewport changed). Only counted; gx_step5_counts
++   hands them out. */
++enum { S5_VERTS, S5_TRIS, S5_RUNS, S5_MTX, S5_N };
++unsigned g_s5_frame[S5_N], g_s5_sum[S5_N], g_s5_max[S5_N], g_s5_frames;
++bool g_s5_mtx_dirty = true, g_s5_state_dirty = true;
++
+ /* VIEW SPACE -> CLIP SPACE, factored out of project() and out of nothing
+    else. The model smoother (ntr/smooth.h) projects the vertices it invents
+    through THIS function rather than through a copy of these six lines, so a
+@@ -1761,6 +1771,8 @@ int smooth_try(const GxVertex &a, const GxVertex &b, const GxVertex &c,
+ void emit_tri(const GxVertex &a, const GxVertex &b, const GxVertex &c,
+               const GxRaw &ra, const GxRaw &rb, const GxRaw &rc) {
+     ++g_smooth_in;   // SMOOTH_COUNT_IN, summed (see per_frame_answers_reset)
++    ++g_s5_frame[S5_TRIS];
++    if (g_s5_state_dirty) { ++g_s5_frame[S5_RUNS]; g_s5_state_dirty = false; }
+     /* OFF IS ONE COMPARE. smooth_level() is a load of a file-scope int that
+        walk_window sets once at boot; with the setting absent it is 0 and this
+        function is the same call it always was. */
+@@ -1867,6 +1879,8 @@ void push_vertex(const GxVertex &v, const GxRaw *r) {
+ void vertex(int16_t x, int16_t y, int16_t z) {
+     g.vx = x; g.vy = y; g.vz = z;
+     if (g.prim < 0) return;
++    ++g_s5_frame[S5_VERTS];
++    if (g_s5_mtx_dirty) { ++g_s5_frame[S5_MTX]; g_s5_mtx_dirty = false; }
+     /* The raw half of the vertex, for the shape store. With the setting
+        absent it is filled with a pair of generations that can never match,
+        so the store is unreachable rather than merely unused. */
+@@ -2341,6 +2355,12 @@ void exec(uint8_t cmd, const uint32_t *p, int np) {
+         }
+         default: break;
+     }
++    /* step 5's counts: what changes the current clip matrix or a run's state
++       (MTX_PUSH and MTX_STORE change neither; a texture-mode command only the
++       texture matrix, which is applied at TEXCOORD / NORMAL time) */
++    if ((cmd == 0x12 || (cmd >= 0x14 && cmd <= 0x1C)) && g.mode != MTX_TEX) g_s5_mtx_dirty = true;
++    else if (cmd == 0x60) g_s5_mtx_dirty = true;
++    else if (cmd == 0x29) g_s5_state_dirty = true;
+     /* SM64DS_STAR_TRAP: catch the exact matrix command that installs the
+        title star's blown-up transform, with the raw parameter words and the
+        host return addresses that issued it. The star's signature is a
+@@ -2514,6 +2534,7 @@ GxGpuAaFn g_gpu_aa = nullptr;
+ }  // namespace
+ 
+ void gx_bind_texture(const uint32_t *rgba, int width, int height) {
++    g_s5_state_dirty = true;
+     g.tex_rgba = rgba;
+     g.tw = width;
+     g.th = height;
+@@ -2834,6 +2855,7 @@ void bind_from_vram() {
+ }  // namespace
+ 
+ void gx_teximage_param(uint32_t v) {
++    g_s5_state_dirty = true;
+     g_teximage = v;
+     ++g_ip_in_vram;
+     bind_from_vram();
+@@ -2841,6 +2863,7 @@ void gx_teximage_param(uint32_t v) {
+     if (g_ip_rec) ip_rec_bind_now();
+ }
+ void gx_pltt_base(uint32_t v) {
++    g_s5_state_dirty = true;
+     g_plttbase = v;
+     ++g_ip_in_vram;
+     bind_from_vram();
+@@ -3119,6 +3142,13 @@ static void smooth_trihash_frame() {
+ 
+ void gx_reset() {
+     per_frame_answers_reset();
++    for (int i = 0; i < S5_N; ++i) {
++        g_s5_sum[i] += g_s5_frame[i];
++        if (g_s5_frame[i] > g_s5_max[i]) g_s5_max[i] = g_s5_frame[i];
++        g_s5_frame[i] = 0;
++    }
++    ++g_s5_frames;
++    g_s5_mtx_dirty = g_s5_state_dirty = true;
+     ++g_resets;
+     g_frame_ortho = false;
+     grid_stats_frame();
+@@ -3333,6 +3363,17 @@ size_t gx_polygon_count() {
+     return g.tris.size() + (size_t)g.grid_subtris;
+ }
+ 
++int gx_step5_counts(unsigned sum[4], unsigned max[4]) {
++    const int frames = (int)g_s5_frames;
++    for (int i = 0; i < S5_N; ++i) {
++        sum[i] = g_s5_sum[i];
++        max[i] = g_s5_max[i];
++        g_s5_sum[i] = g_s5_max[i] = 0;
++    }
++    g_s5_frames = 0;
++    return frames;
++}
++
+ const GxTriangle *gx_polygons(size_t &count) {
+     grids_materialize_w(2);     // a caller that reads the list gets the triangles
+     count = g.tris.size();
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index 9ff6ce816..c9b73f204 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -276,6 +276,11 @@ const GxTriangle *gx_polygons(size_t &count);
+ // The polygon count only: the triangles the list holds plus the ones its kept
+ // smoothed grids stand for, without turning the grids back into triangles.
+ size_t gx_polygon_count();
++// What a GPU-side transform would record (the 3DS port's step 5), since the
++// last call: per frame the vertices, triangles, state runs and matrix ids,
++// summed into sum[] and the largest frame's into max[]; returns the frames
++// (gx_resets) they cover. Only counted, and reset by the call.
++int gx_step5_counts(unsigned sum[4], unsigned max[4]);
+ // Hand the triangle list over: `into` and the list are swapped, so `into` now
+ // owns the frame's triangles (they survive the next gx_reset) and the list
+ // carries on in `into`'s old buffer, emptied, its capacity kept. Returns the
+-- 
+2.49.0
+

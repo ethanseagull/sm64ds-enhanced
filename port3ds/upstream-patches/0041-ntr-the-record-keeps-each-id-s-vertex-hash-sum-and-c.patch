@@ -1,0 +1,130 @@
+From a6cb4bbb148fb6e77276eed4fd2008b1aaed337f Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Mon, 19 Oct 2026 20:50:35 -0700
+Subject: [PATCH] ntr: the record keeps each id's vertex hash, sum and count
+ (gx_record_id_stats)
+
+With gx_record_id_stats(1), rec_vertex folds each vertex's raw x, y, z into
+its id's FNV-1a hash and float sums as it records it, and GxRecRaw carries
+them with the count and first vertex. port3ds's interp3ds read the same
+numbers by walking the whole record again every tick; the arithmetic and
+order are the same, so its pairing is bit-identical (per-tick digests over
+the stress suite).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp           | 31 +++++++++++++++++++++++++++++++
+ port/ntr/include/ntr/gx.h |  9 +++++++++
+ 2 files changed, 40 insertions(+)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 497863e8e..98841b585 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -1799,6 +1799,11 @@ struct RecMtx {
+     int sprite;            // g_menu_sprite
+     uint32_t src;          // the display list streaming when it was made (0: by hand)
+     uint32_t shape;        // Rec::shape then
++    /* gx_record_id_stats: its vertices' raw x, y, z hashed (FNV-1a over the
++       16-bit words, in vertex order) and summed, their count and the first
++       one -- what interp3ds would otherwise walk the whole record for */
++    uint32_t vhash, nv, first;
++    float cs[3];
+ };
+ struct RecRun {
+     uint32_t first;        // its first triangle
+@@ -1848,6 +1853,7 @@ inline void rec_cmd(uint8_t cmd) {
+ }
+ enum { REC_OK = 0, REC_IDS, REC_STRIP };
+ int g_rec_lean_cfg;   // gx_record_configure
++int g_rec_id_stats;   // gx_record_id_stats
+ 
+ // SM64DS_GXREC: 1 record and check every frame (rec_check), 2 record only;
+ // unset, a card that asked for lean frames (gx_record_configure) records.
+@@ -1898,6 +1904,10 @@ inline void rec_vertex(int16_t x, int16_t y, int16_t z, bool new_id) {
+         m.sprite = g_menu_sprite;
+         m.src = g_ip_dma_src;
+         m.shape = R.shape;
++        m.vhash = 2166136261u;
++        m.nv = 0;
++        m.first = (uint32_t)R.v.size();
++        m.cs[0] = m.cs[1] = m.cs[2] = 0.0f;
+         R.mtx.push_back(m);
+     }
+     R.geom = 1;
+@@ -1909,6 +1919,18 @@ inline void rec_vertex(int16_t x, int16_t y, int16_t z, bool new_id) {
+     const bool persp = pj.m[3] != 0.0f || pj.m[7] != 0.0f || pj.m[11] != 0.0f;
+     const uint16_t id = (uint16_t)((R.mtx.size() - 1) | (persp ? 0x8000u : 0u));
+     R.v.push_back({x, y, z, id, g.color, g.u, g.v});
++    if (g_rec_id_stats) {
++        RecMtx &m = R.mtx.back();
++        uint32_t h = m.vhash;
++        h = (h ^ (uint16_t)x) * 16777619u;
++        h = (h ^ (uint16_t)y) * 16777619u;
++        h = (h ^ (uint16_t)z) * 16777619u;
++        m.vhash = h;
++        m.cs[0] += x;
++        m.cs[1] += y;
++        m.cs[2] += z;
++        ++m.nv;
++    }
+ }
+ 
+ inline uint32_t rec_id(const RecVtx &v) { return v.id & 0x7FFFu; }
+@@ -3835,6 +3857,10 @@ void gx_record_configure(int lean) {
+     g_rec_lean_cfg = lean ? 1 : 0;
+ }
+ 
++void gx_record_id_stats(int on) {
++    g_rec_id_stats = on ? 1 : 0;
++}
++
+ void gx_record_to_list() {
+     rec_lean_list();
+ }
+@@ -3932,6 +3958,11 @@ int gx_take_record(GxRecord &into) {
+             std::memcpy(into.raw[k].pws, pws.m, sizeof pws.m);
+             into.raw[k].src = m.src;
+             into.raw[k].shape = m.shape;
++            into.raw[k].stats = g_rec_id_stats ? 1 : 0;
++            into.raw[k].vhash = m.vhash;
++            into.raw[k].nverts = m.nv;
++            into.raw[k].first = m.first;
++            std::memcpy(into.raw[k].csum, m.cs, sizeof m.cs);
+         }
+         for (int i = 0; i < 12; ++i) t.m[i] *= FX12;   // rows 0-2: the raw coordinates' scale
+         std::memcpy(into.mtx[k].m, t.m, sizeof t.m);
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index d7ed54d98..01c25a2c3 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -220,10 +220,16 @@ struct GxRecMatrix {
+ // map gx_take_record folded in.
+ // src is the display list the id's vertices streamed from (0: fed by hand)
+ // and shape a hash of the matrix commands before them (run interp1's keys).
++// With gx_record_id_stats on (stats 1): vhash, the FNV-1a hash of the id's
++// vertices' raw x, y, z as 16-bit words in vertex order; nverts of them from
++// `first` (an id's vertices are one run); csum, their x, y, z summed as floats
++// in that order.
+ struct GxRecRaw {
+     float pos[16];
+     float pws[16];
+     uint32_t src, shape;
++    uint32_t stats, vhash, nverts, first;
++    float csum[3];
+ };
+ struct GxRecord {
+     std::vector<GxRecVertex> v;
+@@ -245,6 +251,9 @@ int gx_take_record(GxRecord &into);
+ // (gx_render for a frame the card does not take, the settle and capture,
+ // gx_polygons, gx_record_to_list). 0 (the default) records beside the list.
+ void gx_record_configure(int lean);
++// 1: the record keeps each id's vertex hash, sum and count as it is made
++// (GxRecRaw stats), for an interpolator that would otherwise walk it again.
++void gx_record_id_stats(int on);
+ // A lean frame's triangles into the list now (a card that cannot draw this
+ // frame's record and will take the triangles instead); nothing otherwise.
+ void gx_record_to_list();
+-- 
+2.55.0.windows.5
+

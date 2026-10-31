@@ -1,0 +1,106 @@
+From a6e65ad0362875cb5bf376372dd34ddf9961b30c Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 17:33:08 -0700
+Subject: [PATCH] tools: extract_assets.ps1 in about 2 s instead of 40
+
+Expand-Blz returned its byte[] unrolled into an object[], so every .NET
+call that took an overlay (BitConverter, Array.Copy) copied the whole
+array back first. That was the 25 s of the handle catalogue and most of
+the 12 s romdata.bin assembly. It now returns the byte[] itself, the
+handle names end at Array.IndexOf, and the assembly runs as a small C#
+loop through Add-Type, with the PowerShell loop kept for when Add-Type
+isn't allowed.
+---
+ tools/portable_kit/extract_assets.ps1 | 55 ++++++++++++++++++++++++---
+ 1 file changed, 50 insertions(+), 5 deletions(-)
+
+diff --git a/tools/portable_kit/extract_assets.ps1 b/tools/portable_kit/extract_assets.ps1
+index 367cb079b..0d8eb7766 100644
+--- a/tools/portable_kit/extract_assets.ps1
++++ b/tools/portable_kit/extract_assets.ps1
+@@ -535,7 +535,10 @@ function Expand-Blz([byte[]] $data) {
+     $result = New-Object 'byte[]' ($passthrough + $outLen)
+     if ($passthrough -gt 0) { [Array]::Copy($data, 0, $result, 0, $passthrough) }
+     [Array]::Copy($out, 0, $result, $passthrough, $outLen)
+-    return $result
++    # The comma keeps it a byte[]: a bare `return $result` unrolls it into an
++    # object[], and every .NET call that takes it (BitConverter, Array.Copy)
++    # then copies the whole array back. That was most of the extraction's time.
++    return ,$result
+ }
+ 
+ # Overlay table entries are 32 bytes: id, ram address, size, bss, two static
+@@ -596,8 +599,9 @@ for ($h = 0; $h -lt $handleCount; $h++) {
+         Stop-Politely ("This dump is Super Mario 64 DS but not a revision this build knows: " +
+                        "asset handle $h points outside overlay 0.")
+     }
+-    $end = $stringOffset
+-    while ($end -lt $ov0.Length -and $ov0[$end] -ne 0) { $end++ }
++    # IndexOf, not a byte-by-byte loop: the loop was 20 s of the extraction
++    $end = [Array]::IndexOf($ov0, [byte]0, $stringOffset)
++    if ($end -lt 0) { $end = $ov0.Length }
+     $assetPath = [Text.Encoding]::ASCII.GetString($ov0, $stringOffset, $end - $stringOffset)
+     if (-not $idByPath.ContainsKey($assetPath)) {
+         Stop-Politely ("This dump is Super Mario 64 DS but not a revision this build knows: " +
+@@ -817,7 +821,48 @@ if (-not (Test-Path -LiteralPath $recipePath)) {
+     $script:Doing = 'assembling romdata.bin'
+     $script:DoingPath = ''
+     $blob = New-Object 'byte[]' $blobTotal
+-    foreach ($line in $recipeLines) {
++    # 12,000 recipe lines took 12 s as a PowerShell loop. The same loop in C#
++    # (Add-Type compiles it with the .NET Framework's own compiler) takes a
++    # moment; where Add-Type isn't allowed, the PowerShell loop below runs.
++    $assembled = $false
++    try {
++        if (-not ('RomdataAssembler' -as [type])) {
++            Add-Type -ErrorAction Stop -TypeDefinition @'
++public static class RomdataAssembler {
++    // -1 when every line fitted, else the index of the first line out of range
++    public static int Run(string[] lines, System.Collections.IDictionary images, byte[] blob) {
++        for (int i = 0; i < lines.Length; i++) {
++            string line = lines[i];
++            if (line.StartsWith("#") || line.Trim().Length == 0) continue;
++            string[] f = line.Split('\t');
++            int off = int.Parse(f[0]), size = int.Parse(f[1]), srcOff = int.Parse(f[3]);
++            byte[] img = Bytes(images[f[2]]);
++            if (img == null || off < 0 || size < 0 || srcOff < 0 || (long)off + size > blob.Length) return i;
++            int have = System.Math.Min(size, System.Math.Max(0, img.Length - srcOff));
++            if (have > 0) System.Array.Copy(img, srcOff, blob, off, have);
++        }
++        return -1;
++    }
++
++    // PowerShell can hand a byte[] over wrapped in a PSObject
++    static byte[] Bytes(object v) {
++        if (v == null) return null;
++        var b = v as byte[];
++        if (b != null) return b;
++        var inner = v.GetType().GetProperty("BaseObject");
++        return inner != null ? inner.GetValue(v, null) as byte[] : null;
++    }
++}
++'@
++        }
++        $bad = [RomdataAssembler]::Run([string[]]$recipeLines, $images, $blob)
++        $assembled = $true
++    } catch { $assembled = $false }
++    if ($assembled -and $bad -ge 0) {
++        Stop-Blocked ("This kit's romdata.recipe.tsv is damaged (a line is out of range), " +
++                      "so the game data cannot be rebuilt. Download the kit again.")
++    }
++    if (-not $assembled) { foreach ($line in $recipeLines) {
+         if ($line.StartsWith('#') -or $line.Trim().Length -eq 0) { continue }
+         $f = $line.Split("`t")
+         $off = [int]$f[0]; $size = [int]$f[1]; $img = $images[$f[2]]; $srcOff = [int]$f[3]
+@@ -827,7 +872,7 @@ if (-not (Test-Path -LiteralPath $recipePath)) {
+         }
+         $have = [Math]::Min($size, [Math]::Max(0, $img.Length - $srcOff))
+         if ($have -gt 0) { [Array]::Copy($img, $srcOff, $blob, $off, $have) }
+-    }
++    } }
+ 
+     $sha = [BitConverter]::ToString(
+         [Security.Cryptography.SHA256]::Create().ComputeHash($blob)).Replace('-', '').ToLowerInvariant()
+-- 
+2.55.0.windows.5
+

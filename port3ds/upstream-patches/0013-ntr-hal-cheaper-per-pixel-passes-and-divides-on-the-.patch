@@ -1,0 +1,330 @@
+From 06a51eef19128759d24ad9a03b3c64ea99c5bf0b Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 14:29:14 -0700
+Subject: [PATCH 13/13] ntr, hal: cheaper per-pixel passes and divides on the
+ 3DS port
+
+Measured with a sampling profile of Bob-omb Battlefield in Azahar (the
+3DS's ARM11 has no divide instruction and pays for every branch):
+- io.cpp run_divide: a 32-bit divide when both operands fit, and the
+  remainder from the quotient (it did two 64-bit library divides on
+  every write to the unit, ~9% of the frame).
+- message_compositor.cpp: window_mask_row fills a line's window mask as
+  spans (SM64DS_WINROW_VERIFY=1 checks it against window_mask); the BG
+  loop, hide_3d_outside_windows and bm_fill_default use it, and
+  bm_fill_default reads BLDCNT once per pass instead of per pixel and
+  maps host columns through a table instead of a divide. g_a_clean[y]
+  marks rows with no hit, so the clear, the blit and the lift scan skip
+  them; every writer of a hit resets it.
+- ppu_sub.cpp ppu_compose_stacked: the source column from a table, not
+  a divide per pixel.
+Same answers throughout. Azahar, Bob-omb Battlefield: engine A's
+compose 44.5 -> 17.7 ms a frame; ten-level sweep 10/10, every tick down.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 132 +++++++++++++++++++++++++++-----
+ port/ntr/io.cpp                 |  12 ++-
+ port/ntr/ppu_sub.cpp            |  14 +++-
+ 3 files changed, 137 insertions(+), 21 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index 618214ee4..99cfec99f 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -724,6 +724,67 @@ inline unsigned window_mask(const Windows &w, int x, int y) {
+     return w.out;
+ }
+ 
++/* window_mask for every column of line y, filled as the few spans the windows
++   cut the line into instead of tested per pixel (a per-pixel call in three
++   per-pixel loops was ~15% of a Bob-omb Battlefield frame on the 3DS port,
++   whose ARM11 pays for every branch). The same precedence, built backwards:
++   WINOUT, then the OBJ window over it, then window 1, then window 0.
++   SM64DS_WINROW_VERIFY=1 compares it with window_mask on every call. */
++inline void win_h_span(const Windows &w, int i, int y, int x, int &a, int &b) {
++    /* the [a, b) run starting at x that win_h_inside answers alike for, and
++       whether it is inside is win_h_inside(w, i, a, y) */
++    int cuts[2];
++    int n = 0;
++    if (!w.rows_on) {
++        cuts[n++] = w.x1[i];
++        cuts[n++] = w.x2[i];
++    } else {
++        cuts[n++] = w.rx1[i][y];
++        cuts[n++] = w.rx2[i][y];
++    }
++    a = x;
++    b = 256;
++    for (int k = 0; k < n; ++k)
++        if (cuts[k] > x && cuts[k] < b) b = cuts[k];
++}
++
++bool winrow_verify_on() {
++    static int on = -1;
++    if (on < 0) {
++        const char *e = std::getenv("SM64DS_WINROW_VERIFY");
++        on = (e && *e && *e != '0') ? 1 : 0;
++    }
++    return on != 0;
++}
++
++inline void window_mask_row(const Windows &w, int y, unsigned char *row) {
++    if (!w.any) {
++        std::memset(row, 0x3F, 256);
++        return;
++    }
++    std::memset(row, w.out, 256);
++    if (w.obj_on)
++        for (int x = 0; x < 256; ++x)
++            if (g_objwin[y][x]) row[x] = (unsigned char)w.obj_in;
++    for (int i = 1; i >= 0; --i) {
++        if (!w.on[i] || y < w.y1[i] || y >= w.y2[i]) continue;
++        for (int x = 0; x < 256;) {
++            int a, b;
++            win_h_span(w, i, y, x, a, b);
++            if (win_h_inside(w, i, a, y))
++                std::memset(row + a, w.in[i], (size_t)(b - a));
++            x = b;
++        }
++    }
++    if (winrow_verify_on()) {
++        static unsigned long bad;
++        for (int x = 0; x < 256; ++x)
++            if (row[x] != (unsigned char)window_mask(w, x, y) && bad++ < 20)
++                std::fprintf(stderr, "[winrow] MISMATCH y %d x %d row %02x window_mask %02x\n",
++                             y, x, row[x], window_mask(w, x, y));
++    }
++}
++
+ /* ---- THE 3D LAYER INSIDE THE WINDOW UNIT (run hunt5, lane WIPES1) -------------
+  *
+  * The minigames' star / circle wipes (dWipe_c, src/func_0202ee94.c) are not a
+@@ -779,12 +840,15 @@ void hide_3d_outside_windows(uint32_t dispcnt, const Windows &w, ntr::Framebuffe
+     /* the DS columns / rows whose mask clears BG0, one verdict per DS pixel */
+     static uint8_t hid[192][256];
+     bool any_hidden = false;
+-    for (int y = 0; y < 192; ++y)
++    unsigned char wrow[256];
++    for (int y = 0; y < 192; ++y) {
++        window_mask_row(w, y, wrow);
+         for (int x = 0; x < 256; ++x) {
+-            const bool h = (window_mask(w, x, y) & 1u) == 0;
++            const bool h = (wrow[x] & 1u) == 0;
+             hid[y][x] = h ? 1 : 0;
+             any_hidden |= h;
+         }
++    }
+     const bool out_hidden = (w.out & 1u) == 0;
+     if (!any_hidden && !out_hidden) return;
+     uint8_t *const cover = const_cast<uint8_t *>(ntr::gx_coverage());
+@@ -888,6 +952,12 @@ struct Cell { uint32_t color; bool hit; uint8_t owner; uint8_t prio;
+    grow for it. */
+ static_assert(sizeof(Cell) == 8, "Cell grew");
+ Cell g_a[192][256];
++/* g_a_clean[y]: row y of g_a is known to hold no hit. Set by the frame's
++   clear, reset by every write of a hit (the BG loops, raster_obj, the star
++   shift, the coin move's proof arm), so the per-pixel passes over g_a skip
++   empty rows: most of the HUD's 192 rows on a level frame. Zero at start: no
++   row is known clear until the first clear. */
++uint8_t g_a_clean[192];
+ 
+ // Owner ids: 0-3 are BG0..BG3 and 4 is the sprite layer. The same numbering is
+ // the bit position in the layer switch below, so a mask and an attribution row
+@@ -2203,6 +2273,7 @@ void raster_obj(uint32_t dispcnt, const Blend &bl, const Windows &win,
+                 }
+                 g_a[py][px].color = color;
+                 g_a[py][px].hit = true;
++                g_a_clean[py] = 0;
+                 g_a[py][px].owner = kOwnerObj;
+                 /* whose texel this is, for the widescreen placement */
+                 g_a[py][px].msgcur = msgcur ? 1 : 0;
+@@ -2356,27 +2427,42 @@ void bm_fill_default(uint32_t dispcnt, const Windows &w) {
+     g_bm_shown3d = shown3d;
+     g_bm_clear_opaque = clear_opaque;
+     const unsigned out_mask = w.any ? w.out : 0x3F;
++    /* Per call, not per pixel (the 3DS port's ARM11 has no divide and the
++       register read is volatile): each host column's DS column, BLDCNT's
++       first targets (bm_verdict's read; nothing writes it during this pass),
++       and each DS line's window mask (window_mask_row). Same answers. */
++    static int s_dsx[ntr::SCREEN_W];
++    for (int hx = 0; hx < ntr::active_w; ++hx) {
++        if (ntr::widescreen) {
++            const int d = hx - margin / 2;
++            s_dsx[hx] = d < 0 ? -1 : ds_col_of(d);
++        } else {
++            s_dsx[hx] = hx / sx;
++        }
++    }
++    const unsigned first = rd16(kRegBase + 0x50) & 0x3F;
++    auto verdict = [first](unsigned layer, unsigned wm) -> unsigned char {
++        return ((wm & 0x20) && (first & (1u << layer))) ? 1 : 0;
++    };
++    unsigned char wrow[256];
++    int wrow_y = -1;
+     for (int hy = 0; hy < ntr::active_h; ++hy) {
+         const int y = ds_row_of(hy);
++        if (y < 192 && y != wrow_y) {
++            window_mask_row(w, y, wrow);
++            wrow_y = y;
++        }
+         unsigned char *row = g_bm + (size_t)hy * ntr::SCREEN_W;
+         for (int hx = 0; hx < ntr::active_w; ++hx) {
+-            int x;
+-            if (ntr::widescreen) {
+-                const int d = hx - margin / 2;
+-                x = d < 0 ? -1 : ds_col_of(d);
+-            } else {
+-                x = hx / sx;
+-            }
+-            const unsigned wm = (x >= 0 && x < 256 && y < 192)
+-                                    ? window_mask(w, x, y) : out_mask;
++            const int x = s_dsx[hx];
++            const unsigned wm = (x >= 0 && x < 256 && y < 192) ? wrow[x] : out_mask;
+             if (card) {
+-                row[hx] = (unsigned char)(bm_verdict(0u, wm) |
+-                                          (bm_verdict(5u, wm) << 1));
++                row[hx] = (unsigned char)(verdict(0u, wm) | (verdict(5u, wm) << 1));
+                 continue;
+             }
+             const bool is3d = shown3d
+                 && (clear_opaque || cover[(size_t)hy * ntr::SCREEN_W + hx]);
+-            row[hx] = bm_verdict(is3d ? 0u : 5u, wm);
++            row[hx] = verdict(is3d ? 0u : 5u, wm);
+         }
+     }
+     g_bm_live = true;
+@@ -2534,6 +2620,7 @@ void bg_loop_ref(Cell (*a)[256], const BgConfig *bgs, const Windows &win,
+                             s = blend_alpha(s, a[y][x].color, bl.eva, bl.evb);
+                         a[y][x].color = s;
+                         a[y][x].hit = true;
++                        g_a_clean[y] = 0;   /* conservative when a is the verify copy */
+                         a[y][x].owner = (uint8_t)bg;
+                         a[y][x].prio = (uint8_t)prio;
+                     }
+@@ -3312,8 +3399,11 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     g_cz.mark(2);
+     // Clear the hit buffer, then BGs by priority (lower priority drawn last so
+     // it wins), honouring the per-pixel window mask.
+-    for (int y = 0; y < 192; ++y)
++    for (int y = 0; y < 192; ++y) {
++        if (g_a_clean[y]) continue;
+         for (int x = 0; x < 256; ++x) g_a[y][x].hit = false;
++        g_a_clean[y] = 1;
++    }
+ 
+     const unsigned lmask = layer_mask_env();
+     const Blend bl = read_blend();
+@@ -3335,9 +3425,11 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     if (twod_old_a_on()) {
+         bg_loop_ref(g_a, bgs, win, lmask, bl);
+     } else if (nbg) {
++        unsigned char wrow[256];
+         for (int y = 0; y < 192; ++y) {
++            window_mask_row(win, y, wrow);
+             for (int x = 0; x < 256; ++x) {
+-                const unsigned mask = window_mask(win, x, y);
++                const unsigned mask = wrow[x];
+                 for (int k = 0; k < nbg; ++k) {
+                     const int bg = bgorder[k];
+                     if (!(mask & (1u << bg))) continue;
+@@ -3353,6 +3445,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                             s = blend_alpha(s, g_a[y][x].color, bl.eva, bl.evb);
+                         g_a[y][x].color = s;
+                         g_a[y][x].hit = true;
++                        g_a_clean[y] = 0;
+                         g_a[y][x].owner = (uint8_t)bg;
+                         g_a[y][x].prio = (uint8_t)bgs[bg].priority;
+                     }
+@@ -3676,7 +3769,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+             for (int y = 0; y < kHudZoneY0 - 1; ++y)
+                 for (int x = 255 - star_shift; x >= 180; --x) {
+                     Cell &c = g_a[y][x];
+-                    if (c.hit && c.owner == kOwnerObj) { g_a[y][x + star_shift] = c; c.hit = false; }
++                    if (c.hit && c.owner == kOwnerObj) { g_a[y][x + star_shift] = c; c.hit = false; g_a_clean[y] = 0; }
+                 }
+         }
+         if (fits) {
+@@ -3701,7 +3794,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                 const bool under = g_a[y - kHudCoinDy][x - dx_move].hit;   /* a live DS plane cell (a letter of POWER) sits where this moved cell lands */
+                 if (under) ++hud_erased;
+                 if (mask_out) mask_out[(y - kHudCoinDy) * 256 + (x - dx_move)] = under ? 2 : 1;
+-                if (g_hud_erase) g_a[y - kHudCoinDy][x - dx_move] = c;   /* PROOF ARM (env only): the pre-fix behaviour, the moved cell REPLACES the plane cell under it */
++                if (g_hud_erase) { g_a[y - kHudCoinDy][x - dx_move] = c; g_a_clean[y - kHudCoinDy] = 0; }   /* PROOF ARM (env only): the pre-fix behaviour, the moved cell REPLACES the plane cell under it */
+                 g_hud_row[y - kHudCoinDy][x - dx_move] = 1;
+                 g_hud_row_live = true;
+             }
+@@ -3736,7 +3829,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     if (g_lift_card && ntr::gx_card_overlay_active() && honour3d) {
+         bool behind_lift = false;
+         for (int y = 0; y < 192 && !behind_lift; ++y)
+-            for (int x = 0; x < 256; ++x) {
++            for (int x = 0; x < 256 && !g_a_clean[y]; ++x) {
+                 const Cell &gc = g_a[y][x];
+                 if (!gc.hit) continue;
+                 const int v = lc_overlay_verdict(gc.owner);
+@@ -3770,6 +3863,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     if (pass && !g_hud_row_live) break;
+     /* pass 0 = the DS plane, pass 1 = the moved coin block's own plane (drawn after, so it covers what is under it) */
+     for (int y = 0; y < 192; ++y) {
++        if (!pass && g_a_clean[y]) continue;   /* no hit in this row of g_a */
+         for (int x = 0; x < 256; ++x) {
+             const Cell &gc = pass ? g_hud_cells[y][x] : g_a[y][x];
+             if (!gc.hit) continue;
+diff --git a/port/ntr/io.cpp b/port/ntr/io.cpp
+index 2736e5e38..94e29826a 100644
+--- a/port/ntr/io.cpp
++++ b/port/ntr/io.cpp
+@@ -219,9 +219,19 @@ void run_divide() {
+         rem = n;
+         quot = (n < 0) ? 1 : -1;
+         if (mode == 0) quot = (n < 0) ? 1 : -1;
++    } else if (n == static_cast<int32_t>(n) && d == static_cast<int32_t>(d) &&
++               !(n == INT32_MIN && d == -1)) {
++        /* Both fit in 32 bits (every 32/32 divide and most of the rest): a
++           32-bit divide, one of them. On a host without a divide instruction
++           (the 3DS's ARM11) the two 64-bit library divides this did were ~9%
++           of a Bob-omb Battlefield frame, and this runs on every write to the
++           unit's operands. Same quotient and remainder (C truncates both). */
++        const int32_t q32 = static_cast<int32_t>(n) / static_cast<int32_t>(d);
++        quot = q32;
++        rem = static_cast<int32_t>(n) - q32 * static_cast<int32_t>(d);
+     } else {
+         quot = n / d;
+-        rem = n % d;
++        rem = n - quot * d;
+     }
+     raw_write(DIV_RESULT, static_cast<uint64_t>(quot), 8);
+     raw_write(DIV_REM, static_cast<uint64_t>(rem), 8);
+diff --git a/port/ntr/ppu_sub.cpp b/port/ntr/ppu_sub.cpp
+index f1e01a9fe..9f1917bc3 100644
+--- a/port/ntr/ppu_sub.cpp
++++ b/port/ntr/ppu_sub.cpp
+@@ -5441,11 +5441,23 @@ void ppu_compose_stacked(const uint32_t *top, const SubFramebuffer &sub,
+        stay live below for the gap band's own seam/straddle fade, a host UI
+        element and not part of the DS raster. */
+     const int rx = active_w / SUB_W, ry = active_h / SUB_H;
++    /* The source column of each x, once per call rather than a divide per
++       pixel (a library call on the 3DS's ARM11, which has no divide: ~5% of a
++       Bob-omb Battlefield frame in a profile). Same arithmetic, same answers. */
++    static int s_col[SCREEN_W];
++    const int ncol = active_w < SCREEN_W ? active_w : SCREEN_W;
++    for (int x = 0; x < ncol; ++x) {
++        const int sx = rx > 0 ? x / rx : (x * SUB_W) / active_w;
++        s_col[x] = sx < SUB_W ? sx : SUB_W - 1;
++    }
+     for (int y = 0; y < active_h; ++y) {
+         const int sy = ry > 0 ? y / ry : (y * SUB_H) / active_h;
+         const uint32_t *src = sub.px[sy < SUB_H ? sy : SUB_H - 1];
+         uint32_t *out = dst + (size_t)(b_y + y) * dst_w;
+-        for (int x = 0; x < active_w; ++x) {
++        int x = 0;
++        for (; x < ncol; ++x)
++            out[x] = src[s_col[x]];
++        for (; x < active_w; ++x) {
+             const int sx = rx > 0 ? x / rx : (x * SUB_W) / active_w;
+             out[x] = src[sx < SUB_W ? sx : SUB_W - 1];
+         }
+-- 
+2.55.0.windows.5
+

@@ -1,0 +1,32 @@
+From d60b78dcbfa0ff738167bcc88b864b1be623d14c Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Thu, 15 Oct 2026 14:03:29 -0700
+Subject: [PATCH 12/13] hal/sdat: the master volume in 32-bit arithmetic
+
+|sample| * 100 fits an int; the 64-bit divide was a library call per
+sample on ARM (the 3DS port mixes 32768 Hz stereo through here).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/sdat/mixer.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/port/hal/sdat/mixer.cpp b/port/hal/sdat/mixer.cpp
+index 50c251bf1..5d08b2c76 100644
+--- a/port/hal/sdat/mixer.cpp
++++ b/port/hal/sdat/mixer.cpp
+@@ -787,8 +787,10 @@ void sd_mix_render(sd_s16 *dst, int frames)
+     // pct == 100 is a no-op fast path; pct == 0 zeroes (the old muted case).
+     int pct = g_host_mute ? 0 : out_volume_pct();
+     if (pct != 100) {
++        /* 32-bit: |sample| * 100 fits easily, and a 64-bit divide is a library
++           call per sample on ARM (the 3DS) */
+         for (int i = 0; i < frames * 2; i++) {
+-            sd_s32 s = (sd_s32)((long long)dst[i] * pct / 100);
++            sd_s32 s = (sd_s32)dst[i] * pct / 100;
+             dst[i] = (sd_s16)(s < -32768 ? -32768 : (s > 32767 ? 32767 : s));
+         }
+     }
+-- 
+2.55.0.windows.5
+

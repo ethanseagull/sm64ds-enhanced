@@ -1,0 +1,45 @@
+From a4dd3288be511dfcc6ff96bed9838a30ceae403a Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 21:56:37 -0700
+Subject: [PATCH] hal: SM64DS_ENGA_LAYERS also prints the colour effect,
+ windows and mosaic
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index f496906de..23e4fec14 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -1978,6 +1978,8 @@ void enga_layer_regs(uint32_t dispcnt, unsigned mask)
+        looked". Scroll registers included: a scroll that moves once mid-scene is
+        the whole question here. */
+     uint32_t sig = dispcnt ^ (mask << 3);
++    for (unsigned off : {0x40u, 0x42u, 0x44u, 0x46u, 0x48u, 0x4Au, 0x4Cu, 0x50u, 0x52u, 0x54u})
++        sig = sig * 131u + rd16(kRegBase + off);
+     for (int b = 0; b < 4; ++b)
+         sig = sig * 131u + rd16(kRegBase + 0x08 + b * 2)
+               + (uint32_t)rd16(kRegBase + 0x10 + b * 4) * 7u
+@@ -1992,6 +1994,17 @@ void enga_layer_regs(uint32_t dispcnt, unsigned mask)
+                  "bg0_3d=%d%s\n", g_enga_frame, dispcnt, mask,
+                  (dispcnt >> 8) & 0x1F,
+                  bg0_is_3d(dispcnt) ? 1 : 0, changed ? " CHANGED" : "");
++    {   // the colour effect, the windows and the mosaic: what a GPU path must reproduce
++        const uint32_t *rows = nullptr;
++        std::fprintf(stderr, "[engA] f%u   mode=%u obj=%d win=%x bldcnt=%04x alpha=%04x "
++                     "bldy=%02x winin=%04x winout=%04x win0=%04x/%04x win1=%04x/%04x "
++                     "mosaic=%04x rows=%d\n", g_enga_frame, dispcnt & 7, (dispcnt >> 12) & 1,
++                     (dispcnt >> 13) & 7, rd16(kRegBase + 0x50), rd16(kRegBase + 0x52),
++                     rd16(kRegBase + 0x54) & 0x1F, rd16(kRegBase + 0x48), rd16(kRegBase + 0x4A),
++                     rd16(kRegBase + 0x40), rd16(kRegBase + 0x44), rd16(kRegBase + 0x42),
++                     rd16(kRegBase + 0x46), rd16(kRegBase + 0x4C),
++                     ntr::rt_window_rows(0, &rows) ? 1 : 0);
++    }
+     for (int b = 0; b < 4; ++b) {
+         const uint16_t cnt = rd16(kRegBase + 0x08 + b * 2);
+         const unsigned sz = (cnt >> 14) & 3;
+-- 
+2.55.0.windows.5
+

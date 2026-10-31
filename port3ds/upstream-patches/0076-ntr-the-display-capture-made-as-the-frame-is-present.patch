@@ -1,0 +1,530 @@
+From 45f65483306c7f7ebc643287d20706c9169b20ea Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Fri, 30 Oct 2026 13:44:29 -0700
+Subject: [PATCH] ntr: the display capture made as the frame is presented, and
+ engine B's bitmaps drawn straight
+
+The card may take a capture and write it when it presents the frame (gx_card_capture_defer, behind a fence at the publish), and engine B draws a lone bitmap BG or bitmap sprites over one BG row by row.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/gpu_raster.cpp   |   1 +
+ port/ntr/gx.cpp           |  78 +++++++++++-
+ port/ntr/include/ntr/gx.h |  18 +++
+ port/ntr/ppu.cpp          |  43 +++++--
+ port/ntr/ppu_sub.cpp      | 246 ++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 372 insertions(+), 14 deletions(-)
+
+diff --git a/port/hal/gpu_raster.cpp b/port/hal/gpu_raster.cpp
+index b565639ec..81428dbeb 100644
+--- a/port/hal/gpu_raster.cpp
++++ b/port/hal/gpu_raster.cpp
+@@ -3388,6 +3388,7 @@ int card_settle(const ntr::GxGpuFrame *f)
+ {
+     if (f->settle == 3) return card_ret_readback(f);
+     if (f->from_record) return 0;   /* draws triangles only: ask again with them */
++    if (f->defer) return 0;         /* captures as it settles, never later */
+     if (!g_cp_held || !f->fb) return 0;
+     /* TWODGPU1: this tick's 2D is in the overlay target, not in the framebuffer */
+     if (g_tw_live && (const uint32_t *)f->fb == g_tw_fb)
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 19988d936..9b4b819bf 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -5961,6 +5961,41 @@ int gx_card_blend_ok() { return g_cp_active && g_cp_blend_ok; }
+ void gx_card_note_blend() { g_cp_blend = 1; }
+ int gx_card_blend_seen() { return g_cp_active && g_cp_blend; }
+ int gx_card_pre_needed() { return g_cp_active && g_cp_pre_needed; }
++/* THE CAPTURE, DEFERRED (ntr/gx.h): the card writes it as it presents the
++   frame, off this thread. Held here until the frame is presented, so a frame
++   that is settled after all (gx_card_settle_because) takes it back first and
++   is captured the old way while its 3D is still on the card. */
++namespace {
++struct CapDefer {
++    uint16_t *dst;
++    int x, y, w, h;
++} g_cap_defer;
++int g_cap_deferred;   // this frame's capture was taken by the card
++void (*g_cap_fence)();
++
++void cap_undefer() {
++    if (!g_cap_deferred) return;
++    g_cap_deferred = 0;
++    GxGpuFrame f;
++    std::memset(&f, 0, sizeof f);
++    f.settle = 2;
++    f.defer = -1;
++    g_gpu_opaque(&f);
++    const CapDefer &c = g_cap_defer;
++    const uint32_t *pic = gx_card_capture_picture();
++    if (!pic) return;   /* the card could not: the block keeps what it had */
++    for (int y = 0; y < c.h; ++y) {
++        const uint32_t *row = pic + (size_t)(c.y + y) * (size_t)SCREEN_W + c.x;
++        uint16_t *out = c.dst + (size_t)y * (size_t)c.w;
++        for (int x = 0; x < c.w; ++x) {
++            const uint32_t p = row[x];
++            out[x] = (uint16_t)(0x8000u | (((p >> 3) & 0x1Fu) << 10) |
++                                (((p >> 11) & 0x1Fu) << 5) | ((p >> 19) & 0x1Fu));
++        }
++    }
++}
++}  // namespace
++
+ void gx_card_retire(const Framebuffer *fb)
+ {
+     /* the tick is composited: nothing of it is held for a later settle */
+@@ -6003,8 +6038,10 @@ int gx_card_interp_clear(Framebuffer &fb)
+ 
+ static void clear_fill_impl(Framebuffer &fb, bool wipe)
+ {
+-    /* a new frame: nothing from the last one is held any more */
++    /* a new frame: nothing from the last one is held any more (a capture the
++       card took went with the frame it presented) */
+     g_cp_active = 0;
++    g_cap_deferred = 0;
+     g_cp_pending = 0;
+     g_cp_behind = 0;
+     g_cp_blend = 0;
+@@ -6141,6 +6178,8 @@ void gx_card_settle_because(const char *why)
+         if (i == used && used < 16) { tab[used].why = why; tab[used].n = 0; ++used; }
+         if (i < used) ++tab[i].n;
+     }
++    /* a capture the card took for this frame is made now, from the card */
++    cap_undefer();
+     /* classical from here on, whatever the card answers */
+     g_cp_active = 0;
+     raster_buffers();
+@@ -6237,6 +6276,43 @@ const uint32_t *gx_card_capture_picture()
+     return g_cp_scratch;
+ }
+ 
++int gx_card_capture_defer(uint16_t *dst, int x, int y, int w, int h) {
++    if (!g_cp_active || !g_cp_fb || !g_gpu_opaque || g_cap_deferred) return 0;
++    if (!(g_rec.lean && g_rec.on && !g_rec.listed)) return 0;   /* the record draws it */
++    GxGpuOut out;
++    std::memset(&out, 0, sizeof out);
++    GxGpuFrame f;
++    std::memset(&f, 0, sizeof f);
++    f.settle = 2;
++    f.defer = 1;
++    f.cap_dst = dst;
++    f.cap_x = x;
++    f.cap_y = y;
++    f.cap_w = w;
++    f.cap_h = h;
++    f.outside_argb = kOldClear;
++    f.fb = &g_cp_fb->px[0][0];
++    f.stride = SCREEN_W;
++    f.cw = g_cp_geo.cw;
++    f.ch = g_cp_geo.ch;
++    f.px0 = g_cp_geo.px0;
++    f.py0 = g_cp_geo.py0;
++    f.pw = g_cp_geo.pw;
++    f.ph = g_cp_geo.ph;
++    f.aa_mode = g_aa_mode;
++    f.out = &out;
++    if (g_gpu_opaque(&f) != 1) return 0;
++    g_cap_defer = {dst, x, y, w, h};
++    g_cap_deferred = 1;
++    return 1;
++}
++
++void gx_card_capture_fence() {
++    if (g_cap_fence) g_cap_fence();
++}
++
++void gx_set_capture_fence(void (*fence)()) { g_cap_fence = fence; }
++
+ namespace {
+ 
+ /* Rec.601 luma, the channel weighting every edge filter of this family uses,
+diff --git a/port/ntr/include/ntr/gx.h b/port/ntr/include/ntr/gx.h
+index 4149930e7..35ecf21c8 100644
+--- a/port/ntr/include/ntr/gx.h
++++ b/port/ntr/include/ntr/gx.h
+@@ -534,9 +534,19 @@ struct GxGpuFrame {
+     //         (gx_copy_record) instead, answering 1; any other answer and the
+     //         settle is asked again with the triangles. Making them was most
+     //         of a capture on the 3DS (the four dual-screen minigames).
++    // defer   with settle 2 (gx_card_capture_defer): 1 = the card may write the
++    //         capture itself, later, when it presents this frame: the picture
++    //         settle 2 would make, cap_w x cap_h from (cap_x, cap_y), as BGR555
++    //         with bit 15 set into cap_dst (cap_w a row), done before the fence
++    //         (gx_set_capture_fence) returns. Answer 1 to take it. -1 = a
++    //         taken one is withdrawn (the frame is being settled after all and
++    //         is captured now).
+     int keep;
+     int settle;
+     int from_record;
++    int defer;
++    uint16_t *cap_dst;
++    int cap_x, cap_y, cap_w, cap_h;
+     // slot    with settle 3 (run hunt8, lane GPUINTERP1): 1 the retained tick's
+     //         composite, 2 the retained picture between two ticks
+     int slot;
+@@ -691,6 +701,14 @@ void gx_card_settle();
+ // at exit, which is how a frame that reads the picture back stays visible.
+ void gx_card_settle_because(const char *why);
+ const uint32_t *gx_card_capture_picture();
++// THE CAPTURE, DEFERRED: 1 when the card will write this frame's capture
++// (w x h from (x, y) of the picture, BGR555 into dst) as it presents the
++// frame (GxGpuFrame::defer), 0 when the caller must capture now. Whatever
++// reads or writes a captured block first calls gx_card_capture_fence, which
++// returns once a deferred capture is written.
++int gx_card_capture_defer(uint16_t *dst, int x, int y, int w, int h);
++void gx_card_capture_fence();
++void gx_set_capture_fence(void (*fence)());
+ 
+ // ---- A HELD TICK UNDER SMOOTHMOTION (run hunt8, lane CARDSM1) ----------------
+ // With the SmoothMotion key on, the pictures between two ticks are drawn from
+diff --git a/port/ntr/ppu.cpp b/port/ntr/ppu.cpp
+index c9cf8bf23..b30fd82ea 100644
+--- a/port/ntr/ppu.cpp
++++ b/port/ntr/ppu.cpp
+@@ -740,6 +740,10 @@ void capture_forget(void) {
+ }  // namespace
+ 
+ void ppu_vram_publish(void) {
++    /* a capture the card is still writing (gx_card_capture_defer) lands first:
++       this is what carries a captured block to where the program reads it */
++    gx_card_capture_fence();
++
+     /* A SCENE BOOT (see 2 above): drop what the last scene captured. Read
+        before anything else because this is the frame the new scene's banks are
+        mapped on, and ppu_display_capture clears the enable bit at the end of
+@@ -835,6 +839,7 @@ void ppu_capture_counters(unsigned long long &performed,
+ }
+ 
+ void ppu_display_capture(const uint32_t *src, int w, int h) {
++    gx_card_capture_fence();   /* the last one written before this one starts */
+     volatile uint32_t *reg = reinterpret_cast<volatile uint32_t *>(kDispCapCnt);
+     const uint32_t cap = *reg;
+     if (!(cap & 0x80000000u)) return;
+@@ -967,6 +972,31 @@ void ppu_display_capture(const uint32_t *src, int w, int h) {
+         }
+     }
+     uint16_t *dst = reinterpret_cast<uint16_t *>(lcdc_addr(block) + off);
++    /* THE HASH ONLY WHEN ASKED (SM64DS_CAPTURE_HASH=1, or SM64DS_CAPTURE_HASH=0
++       to turn it off on a host that asks by default): two 64-bit multiplies a
++       pixel are a few ms of a dual-screen minigame's frame on the 3DS, for a
++       number only the [aa] diagnostics print. Off by default on the 3DS
++       (SM64DS_HOST_3DS); every other host keeps it on. */
++    static const bool hash_on = [] {
++        const char *e = std::getenv("SM64DS_CAPTURE_HASH");
++#if defined(SM64DS_HOST_3DS)
++        return e && *e && *e != '0';
++#else
++        return !(e && *e == '0');
++#endif
++    }();
++    /* THE CARD MAY WRITE IT AS IT PRESENTS THE FRAME (gx_card_capture_defer):
++       the same picture, made on the card and the present's thread instead of
++       here. One DS pixel a source pixel only, and not while hashing (the hash
++       is of the bytes as they are written). */
++    if (!hash_on && rx == 1 && ry == 1 && cx0 + cw <= w && cy0 + ch <= h &&
++        gx_card_capture_defer(dst, cx0, cy0, cw, ch)) {
++        if (gx_anti_aliasing()) ++g_cap_from_preimage;
++        ++g_cap_performed;
++        g_cap[block].off = off;
++        g_cap[block].len = need;
++        return;
++    }
+     /* ---- WHAT THE GAME IS ALLOWED TO READ BACK ------------------------------
+      * `src` is the live framebuffer, which may carry the AntiAliasing pass's
+      * edge smoothing. The game must not see a host picture setting, so when
+@@ -999,19 +1029,6 @@ void ppu_display_capture(const uint32_t *src, int w, int h) {
+        at the end: a global read-modify-write per pixel would be the only thing
+        in this loop the compiler cannot keep in a register. */
+     unsigned long long h1 = g_cap_hash;
+-    /* THE HASH ONLY WHEN ASKED (SM64DS_CAPTURE_HASH=1, or SM64DS_CAPTURE_HASH=0
+-       to turn it off on a host that asks by default): two 64-bit multiplies a
+-       pixel are a few ms of a dual-screen minigame's frame on the 3DS, for a
+-       number only the [aa] diagnostics print. Off by default on the 3DS
+-       (SM64DS_HOST_3DS); every other host keeps it on. */
+-    static const bool hash_on = [] {
+-        const char *e = std::getenv("SM64DS_CAPTURE_HASH");
+-#if defined(SM64DS_HOST_3DS)
+-        return e && *e && *e != '0';
+-#else
+-        return !(e && *e == '0');
+-#endif
+-    }();
+     if (!hash_on && rx == 1 && ry == 1 && cx0 + cw <= w && cy0 + ch <= h) {
+         /* one DS pixel a source pixel, inside the extent: straight rows */
+         for (int y = 0; y < ch; ++y) {
+diff --git a/port/ntr/ppu_sub.cpp b/port/ntr/ppu_sub.cpp
+index b35768fab..379f4812b 100644
+--- a/port/ntr/ppu_sub.cpp
++++ b/port/ntr/ppu_sub.cpp
+@@ -682,6 +682,45 @@ void raster_obj(uint32_t dispcnt, const uint8_t *skip, ObjPixel (*obj)[256],
+             pd = (int16_t)rd16(oam_b + (grp * 4 + 3) * 8u + 6);
+         }
+ 
++        /* A BITMAP SPRITE NOT ROTATED (the display capture's twelve, below): a
++           row of it is consecutive 16-bit pixels, so each row is read straight
++           -- the same address, opacity and priority rules as the loop below,
++           without working each pixel out again. That loop was ~18 ms of a
++           scan on the 3DS for the twelve. */
++        if (is_bmp && !affine) {
++            if (!((a2 >> 12) & 0xF)) continue;   /* alpha 0: not displayed */
++            uint32_t base, stride;
++            if ((dispcnt >> 6) & 1) {
++                base = tile * (((dispcnt >> 22) & 1) ? 256u : 128u);
++                stride = (uint32_t)w;
++            } else {
++                stride = ((dispcnt >> 5) & 1) ? 256u : 128u;
++                const uint32_t mask = (stride >> 3) - 1u;
++                base = (tile & mask) * 0x10u + (tile & ~mask) * 0x80u;
++            }
++            const int sx0 = x < 0 ? -x : 0, sx1 = x + w > 256 ? 256 - x : w;
++            for (int sy = 0; sy < h; ++sy) {
++                const int py = y + sy;
++                if (py < 0 || py >= 192) continue;
++                const int ty = vflip ? h - 1 - sy : sy;
++                const uint16_t *row = reinterpret_cast<const uint16_t *>(
++                    kObjVram + base + (uint32_t)ty * stride * 2u);
++                ObjPixel *orow = obj[py];
++                for (int sx = sx0; sx < sx1; ++sx) {
++                    const uint16_t v = row[hflip ? w - 1 - sx : sx];
++                    if (!(v & 0x8000)) continue;
++                    ObjPixel &p = orow[x + sx];
++                    if (p.hit && prio > p.prio) continue;
++                    p.color = bgr555(v);
++                    p.prio = prio;
++                    p.hit = 1;
++                    p.semi = 0;
++                    g_obj_rows[py] = 1;
++                }
++            }
++            continue;
++        }
++
+         for (int sy = 0; sy < bh; ++sy) {
+             const int py = y + sy;
+             if (py < 0 || py >= 192) continue;
+@@ -1237,6 +1276,38 @@ void sample_line(const BgLayer &c, int y, const uint32_t *pal32, uint32_t *col,
+     }
+     const int bx = c.refx + c.pb * y, by = c.refy + c.pd * y;
+     if (c.kind == BG_BITMAP_256 || c.kind == BG_BITMAP_DIRECT) {
++        /* NOT ROTATED OR SCALED ACROSS (a display capture shown as it is, the
++           dual-screen minigames' other screen): the line is one row of the
++           bitmap in order, so no matrix and no bounds per pixel. Same pixels
++           as the loop below. */
++        if (c.pa == 0x100 && c.pc == 0) {
++            const int px0 = bx >> 8;
++            int py = by >> 8;
++            if (c.wrap) py &= c.map_h - 1;
++            if (!c.wrap && (py < 0 || py >= c.map_h)) {
++                std::memset(ok, 0, 256);
++                return;
++            }
++            if (px0 >= 0 && px0 + 256 <= c.map_w) {
++                const uint32_t at = (uint32_t)py * (uint32_t)c.map_w + (uint32_t)px0;
++                if (c.kind == BG_BITMAP_DIRECT) {
++                    const uint16_t *row = reinterpret_cast<const uint16_t *>(c.screen + at * 2);
++                    for (int x = 0; x < 256; ++x) {
++                        const uint16_t v = row[x];
++                        ok[x] = (uint8_t)(v >> 15);
++                        if (v & 0x8000) col[x] = bgr555(v);
++                    }
++                } else {
++                    const uint8_t *row = reinterpret_cast<const uint8_t *>(c.screen + at);
++                    for (int x = 0; x < 256; ++x) {
++                        const uint8_t i8 = row[x];
++                        ok[x] = i8 ? 1 : 0;
++                        if (i8) col[x] = pal32[i8];
++                    }
++                }
++                return;
++            }
++        }
+         for (int x = 0; x < 256; ++x) {
+             int px = (bx + c.pa * x) >> 8;
+             int py = (by + c.pc * x) >> 8;
+@@ -1633,8 +1704,183 @@ bool bytes_equal(const void *a, const void *b, size_t len)
+     return true;
+ }
+ 
++/* ONE DIRECT-COLOUR BITMAP AND NOTHING ELSE: the dual-screen minigames' other
++   screen, engine B showing last frame's display capture. Its 128 KB changes
++   every frame, so the cache only compared and saved it to draw anyway, and the
++   general walk ran for one layer; on the 3DS that was ~14 ms a scan. With BG2
++   alone (no other BG, no sprite, no window), not rotated across and no colour
++   effect, scan_fast's walk is: the bitmap's colour where its bit 15 is set,
++   else the backdrop, then the master brightness. That, row by row. */
++bool scan_bitmap_only(SubFramebuffer &fb, uint32_t dispcnt)
++{
++    if (((dispcnt >> 16) & 3) != 1 || ((dispcnt >> 7) & 1)) return false;
++    if ((dispcnt & 0xFF00u) != 0x0400u) return false;
++    BgLayer c;
++    read_bg(c, 2, dispcnt);
++    if (c.kind != BG_BITMAP_DIRECT || c.pa != 0x100 || c.pc != 0) return false;
++    if (read_blend().mode != 0) return false;
++    Bright br;
++    {
++        const uint16_t mb = reg16(kRegBase + 0x6C);
++        br.factor = mb & 0x1F;
++        if (br.factor > 16) br.factor = 16;
++        br.mode = (mb >> 14) & 3;
++    }
++    const uint32_t backdrop = bgr555(rd16(kPlttBase));
++    uint32_t col[256];
++    uint8_t ok[256];
++    for (int y = 0; y < SUB_H; ++y) {
++        sample_line(c, y, nullptr, col, ok);
++        for (int x = 0; x < SUB_W; ++x) fb.px[y][x] = apply_bright(ok[x] ? col[x] : backdrop, br);
++    }
++    return true;
++}
++
++/* BITMAP SPRITES OVER AT MOST ONE BG: the other half of the same flip, where
++   the capture comes back as twelve 64x64 direct-colour sprites (raster_obj's
++   note) over BG2, the other 116 entries all zero (8x8 tile sprites at 0,0,
++   under them). With every drawn sprite at one priority no farther than the
++   BG's, no window and no colour effect, scan_fast's walk is: the topmost
++   opaque sprite pixel (the lowest index: raster_obj's 127 -> 0 overwrite),
++   else the BG's pixel, else the backdrop; then the master brightness. So the
++   BG's rows go straight into the picture and the unrotated bitmap sprites'
++   rows over them, top sprite first, each pixel taken once (`covered`). Any
++   other sprite must be wholly covered already, or this answers false and the
++   general walk draws the frame. That walk, its sprite buffer and its clears
++   were ~12 ms of the scan on the 3DS. */
++bool scan_bitmap_objs(SubFramebuffer &fb, uint32_t dispcnt, const uint8_t *skip)
++{
++    if (((dispcnt >> 16) & 3) != 1 || ((dispcnt >> 7) & 1)) return false;
++    if (!((dispcnt >> 12) & 1) || (dispcnt & 0xE000u)) return false;   /* OBJ, no window */
++    const unsigned bgs_on = (dispcnt >> 8) & 0xFu;
++    if (bgs_on & (bgs_on - 1u)) return false;                          /* one BG at most */
++    if (read_blend().mode != 0) return false;
++    static const int kSizes[3][4][2] = {
++        {{8, 8}, {16, 16}, {32, 32}, {64, 64}},
++        {{16, 8}, {32, 8}, {32, 16}, {64, 32}},
++        {{8, 16}, {8, 32}, {16, 32}, {32, 64}},
++    };
++    const uint32_t oam_b = g_oam_src_b ? g_oam_src_b : kOamBase;
++    /* which entries draw, and that they agree on a priority */
++    int prio = -1, nbmp = 0;
++    for (int i = 0; i < 128; ++i) {
++        if (skip[i]) continue;
++        const uint16_t a0 = rd16(oam_b + i * 8u), a2 = rd16(oam_b + i * 8u + 4);
++        const bool affine = a0 & 0x100;
++        if (!affine && (a0 & 0x200)) continue;                          /* disabled */
++        if (((a0 >> 14) & 3) == 3) continue;                            /* shape 3: none */
++        const unsigned mode = (a0 >> 10) & 3;
++        if (mode == 2) continue;                                        /* a window: none on */
++        if (mode == 3) {
++            if (affine) return false;
++            if (!((a2 >> 12) & 0xF)) continue;                          /* alpha 0 */
++            ++nbmp;
++        }
++        const int p = (a2 >> 10) & 3;
++        if (prio >= 0 && p != prio) return false;
++        prio = p;
++    }
++    if (!nbmp) return false;
++    BgLayer c;
++    c.kind = BG_OFF;
++    if (bgs_on) read_bg(c, __builtin_ctz(bgs_on), dispcnt);
++    if (c.kind != BG_OFF && c.prio < prio) return false;               /* a sprite behind it */
++    uint32_t pal32[256];
++    for (int i = 0; i < 256; ++i) pal32[i] = bgr555(rd16(kPlttBase + i * 2));
++    const uint32_t backdrop = pal32[0];
++    static uint8_t covered[SUB_H][SUB_W];
++    int ncov[SUB_H];   /* each row's pixels covered */
++    std::memset(covered, 0, sizeof covered);
++    std::memset(ncov, 0, sizeof ncov);
++    for (int i = 0; i < 128; ++i) {
++        if (skip[i]) continue;
++        const uint16_t a0 = rd16(oam_b + i * 8u), a1 = rd16(oam_b + i * 8u + 2),
++                       a2 = rd16(oam_b + i * 8u + 4);
++        const bool affine = a0 & 0x100;
++        if (!affine && (a0 & 0x200)) continue;
++        const int shape = (a0 >> 14) & 3;
++        if (shape == 3) continue;
++        const unsigned mode = (a0 >> 10) & 3;
++        if (mode == 2 || (mode == 3 && !((a2 >> 12) & 0xF))) continue;
++        const int w = kSizes[shape][(a1 >> 14) & 3][0], h = kSizes[shape][(a1 >> 14) & 3][1];
++        const bool dbl = affine && (a0 & 0x200);
++        const int bw = dbl ? w * 2 : w, bh = dbl ? h * 2 : h;
++        int x = a1 & 0x1FF, y = a0 & 0xFF;
++        if (x >= 256) x -= 512;
++        if (y >= 192 && y >= 256 - bh) y -= 256;
++        const int sx0 = x < 0 ? -x : 0, sx1 = x + bw > 256 ? 256 - x : bw;
++        if (mode != 3) {
++            /* drawn under the sprites above it: only where they leave nothing */
++            for (int sy = 0; sy < bh; ++sy) {
++                const int py = y + sy;
++                if (py < 0 || py >= SUB_H) continue;
++                for (int sx = sx0; sx < sx1; ++sx)
++                    if (!covered[py][x + sx]) return false;
++            }
++            continue;
++        }
++        const bool hflip = a1 & 0x1000, vflip = a1 & 0x2000;
++        const uint32_t tile = a2 & 0x3FF;
++        uint32_t base, stride;   /* raster_obj's bitmap addressing */
++        if ((dispcnt >> 6) & 1) {
++            base = tile * (((dispcnt >> 22) & 1) ? 256u : 128u);
++            stride = (uint32_t)w;
++        } else {
++            stride = ((dispcnt >> 5) & 1) ? 256u : 128u;
++            const uint32_t mask = (stride >> 3) - 1u;
++            base = (tile & mask) * 0x10u + (tile & ~mask) * 0x80u;
++        }
++        for (int sy = 0; sy < h; ++sy) {
++            const int py = y + sy;
++            if (py < 0 || py >= SUB_H) continue;
++            const int ty = vflip ? h - 1 - sy : sy;
++            const uint16_t *src = reinterpret_cast<const uint16_t *>(
++                kObjVram + base + (uint32_t)ty * stride * 2u);
++            uint32_t *row = fb.px[py];
++            uint8_t *cov = covered[py];
++            int n = 0;
++            for (int sx = sx0; sx < sx1; ++sx) {
++                if (cov[x + sx]) continue;
++                const uint16_t v = src[hflip ? w - 1 - sx : sx];
++                if (!(v & 0x8000)) continue;
++                row[x + sx] = bgr555(v);
++                cov[x + sx] = 1;
++                ++n;
++            }
++            ncov[py] += n;
++        }
++    }
++    /* then the BG, or the backdrop, wherever no sprite drew (the capture's
++       sprites leave nowhere: the BG is not read at all) */
++    uint32_t col[256];
++    uint8_t ok[256];
++    for (int y = 0; y < SUB_H; ++y) {
++        if (ncov[y] == SUB_W) continue;
++        uint32_t *row = fb.px[y];
++        const uint8_t *cov = covered[y];
++        if (c.kind != BG_OFF) sample_line(c, y, pal32, col, ok);
++        for (int x = 0; x < SUB_W; ++x)
++            if (!cov[x]) row[x] = (c.kind != BG_OFF && ok[x]) ? col[x] : backdrop;
++    }
++    Bright br;
++    {
++        const uint16_t mb = reg16(kRegBase + 0x6C);
++        br.factor = mb & 0x1F;
++        if (br.factor > 16) br.factor = 16;
++        br.mode = (mb >> 14) & 3;
++    }
++    if (br.factor && (br.mode == 1 || br.mode == 2))
++        for (int y = 0; y < SUB_H; ++y)
++            for (int x = 0; x < SUB_W; ++x) fb.px[y][x] = apply_bright(fb.px[y][x], br);
++    return true;
++}
++
+ void scan_cached(SubFramebuffer &fb, uint32_t dispcnt, const uint8_t *skip)
+ {
++    if (scan_bitmap_only(fb, dispcnt) || scan_bitmap_objs(fb, dispcnt, skip)) {
++        ++g_scan_draws;
++        return;
++    }
+     ScanSlot *sl = nullptr;
+     for (int i = 0; i < 2; ++i)
+         if (g_scan_slot[i] && g_scan_slot[i]->dst == &fb) sl = g_scan_slot[i];
+-- 
+2.55.0.windows.5
+

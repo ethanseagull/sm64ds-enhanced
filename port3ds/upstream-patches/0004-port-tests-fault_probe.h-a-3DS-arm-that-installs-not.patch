@@ -1,0 +1,47 @@
+From eb891bdc631d96156a106581adbd8dc89feed138 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 17:54:13 -0700
+Subject: [PATCH 04/13] port/tests/fault_probe.h: a 3DS arm that installs
+ nothing
+
+The New 3DS port has no SEH or debug registers; its smoke runner installs a
+CPU exception handler instead. <windows.h> (the port's compat subset) is still
+included because includers rely on it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/tests/fault_probe.h | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/port/tests/fault_probe.h b/port/tests/fault_probe.h
+index 8f68dac7c..8b2348689 100644
+--- a/port/tests/fault_probe.h
++++ b/port/tests/fault_probe.h
+@@ -3,6 +3,17 @@
+ #ifndef PORT_FAULT_PROBE_H
+ #define PORT_FAULT_PROBE_H
+ 
++#if defined(SM64DS_HOST_3DS)
++/* The New 3DS port has no SEH, debug registers or /MAP file. Its smoke
++   runner installs a CPU exception handler instead
++   (port3ds/src/crash_handler.cpp), so the probe installs nothing here.
++   <windows.h> is still included (the port's compat subset): includers rely
++   on getting it from here, as on the PC. */
++#include <windows.h>
++#include <stdio.h>
++#define PORT_INSTALL_FAULT_PROBE() ((void)0)
++#else
++
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+ #include <stdio.h>
+@@ -1126,4 +1137,6 @@ extern "C" const char *port_crash_dir_get(void)
+ }
+ #endif
+ 
++#endif /* SM64DS_HOST_3DS */
++
+ #endif
+-- 
+2.55.0.windows.5
+

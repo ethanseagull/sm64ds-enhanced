@@ -1,0 +1,137 @@
+From 90059eb29b411f039ecb9e514b9f13f3a00779ee Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 01:16:24 -0700
+Subject: [PATCH] ntr: matrix products cheaper: mul unrolled in its own order,
+ the record's proj x W x S once per projection
+
+mul() sums each entry in the loop's order (bit-identical: the CPU path's
+screenshots are byte-for-byte unchanged) without zeroing its result first;
+gx_take_record computes proj x W x S once for each distinct projection,
+viewport and sprite bracket and one product per id, instead of three.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/gx.cpp | 83 ++++++++++++++++++++++++++++++++-----------------
+ 1 file changed, 55 insertions(+), 28 deletions(-)
+
+diff --git a/port/ntr/gx.cpp b/port/ntr/gx.cpp
+index 2db742fde..f6407a254 100644
+--- a/port/ntr/gx.cpp
++++ b/port/ntr/gx.cpp
+@@ -49,13 +49,20 @@ struct Mat {
+ };
+ 
+ Mat mul(const Mat &a, const Mat &b) {
+-    Mat r{};
+-    for (int i = 0; i < 4; ++i)
+-        for (int j = 0; j < 4; ++j) {
+-            float s = 0;
+-            for (int k = 0; k < 4; ++k) s += a.m[i * 4 + k] * b.m[k * 4 + j];
+-            r.m[i * 4 + j] = s;
+-        }
++    /* Unrolled, each entry summed in the loop's order -- ((((0 + a0 b0) +
++       a1 b4) + a2 b8) + a3 b12), the 0 + kept for its signed zero -- so every
++       float is what `for k: s += a[i][k] * b[k][j]` made (the matrix commands
++       run this per MTX_MULT, twice in POSVEC mode: ~12% of a file-select
++       frame on Azahar as a loop with a zeroed result). */
++    Mat r;
++    for (int i = 0; i < 4; ++i) {
++        const float a0 = a.m[i * 4], a1 = a.m[i * 4 + 1], a2 = a.m[i * 4 + 2], a3 = a.m[i * 4 + 3];
++        float *o = r.m + i * 4;
++        o[0] = (((0.0f + a0 * b.m[0]) + a1 * b.m[4]) + a2 * b.m[8]) + a3 * b.m[12];
++        o[1] = (((0.0f + a0 * b.m[1]) + a1 * b.m[5]) + a2 * b.m[9]) + a3 * b.m[13];
++        o[2] = (((0.0f + a0 * b.m[2]) + a1 * b.m[6]) + a2 * b.m[10]) + a3 * b.m[14];
++        o[3] = (((0.0f + a0 * b.m[3]) + a1 * b.m[7]) + a2 * b.m[11]) + a3 * b.m[15];
++    }
+     return r;
+ }
+ 
+@@ -3829,6 +3836,33 @@ const GxTriangle *gx_take_triangles(std::vector<GxTriangle> &into) {
+    squeeze and zoom, under the id's own sprite bracket), and to_screen's
+    viewport map in homogeneous form (X w = x vp_w/2 + w (vp_w/2 + vp_x),
+    Y w = -y vp_h/2 + w (vp_h/2 + vp_y), Z w = z/2 + w/2). */
++// gx_take_record's proj x W x S for one id's inputs: W the widen (Hor+ for a
++// perspective projection) or the menu-wide squeeze/zoom, S to_screen's
++// viewport map in homogeneous form.
++static Mat rec_pws(const RecMtx &m, bool mw, bool persp) {
++    Mat W = Mat::identity();
++    if (mw) {
++        W.m[0] = (float)present_w() / (float)active_w;
++        W.m[5] = (float)present_h() / (float)active_h;
++        if (!m.sprite && (g.mw_zoom != 1.0f || g.mw_dy != 0.0f)) {
++            W.m[0] *= g.mw_zoom;
++            W.m[5] *= g.mw_zoom;
++            W.m[13] = g.mw_dy;
++        }
++    } else if (persp) {
++        W.m[0] = hor_widen();
++    }
++    Mat S{};
++    S.m[0] = m.vp[2] * 0.5f;
++    S.m[12] = m.vp[2] * 0.5f + m.vp[0];
++    S.m[5] = -m.vp[3] * 0.5f;
++    S.m[13] = m.vp[3] * 0.5f + m.vp[1];
++    S.m[10] = 0.5f;
++    S.m[14] = 0.5f;
++    S.m[15] = 1.0f;
++    return mul(mul(m.proj, W), S);
++}
++
+ int gx_take_record(GxRecord &into) {
+     Rec &R = g_rec;
+     into.runs.clear();
+@@ -3854,30 +3888,22 @@ int gx_take_record(GxRecord &into) {
+     }
+     const bool mw = menu_wide();
+     into.mtx.resize(R.mtx.size());
++    // proj x W x S is shared by every id with the same projection, viewport
++    // and menu-sprite bracket (nearly all of a frame's), so each id costs one
++    // product, pos x (proj W S), not three (the skinned title face has ~330
++    // ids a frame). The grouping moves the floats by rounding only.
++    const RecMtx *key = nullptr;
++    Mat pws;
++    bool persp = false;
+     for (size_t k = 0; k < R.mtx.size(); ++k) {
+         const RecMtx &m = R.mtx[k];
+-        const bool persp = m.proj.m[3] != 0.0f || m.proj.m[7] != 0.0f || m.proj.m[11] != 0.0f;
+-        Mat W = Mat::identity();
+-        if (mw) {
+-            W.m[0] = (float)present_w() / (float)active_w;
+-            W.m[5] = (float)present_h() / (float)active_h;
+-            if (!m.sprite && (g.mw_zoom != 1.0f || g.mw_dy != 0.0f)) {
+-                W.m[0] *= g.mw_zoom;
+-                W.m[5] *= g.mw_zoom;
+-                W.m[13] = g.mw_dy;
+-            }
+-        } else if (persp) {
+-            W.m[0] = hor_widen();
++        if (!key || std::memcmp(&m.proj, &key->proj, sizeof m.proj) != 0 ||
++            std::memcmp(m.vp, key->vp, sizeof m.vp) != 0 || m.sprite != key->sprite) {
++            key = &m;
++            persp = m.proj.m[3] != 0.0f || m.proj.m[7] != 0.0f || m.proj.m[11] != 0.0f;
++            pws = rec_pws(m, mw, persp);
+         }
+-        Mat S{};
+-        S.m[0] = m.vp[2] * 0.5f;
+-        S.m[12] = m.vp[2] * 0.5f + m.vp[0];
+-        S.m[5] = -m.vp[3] * 0.5f;
+-        S.m[13] = m.vp[3] * 0.5f + m.vp[1];
+-        S.m[10] = 0.5f;
+-        S.m[14] = 0.5f;
+-        S.m[15] = 1.0f;
+-        Mat t = mul(mul(mul(m.pos, m.proj), W), S);
++        Mat t = mul(m.pos, pws);
+         for (int i = 0; i < 12; ++i) t.m[i] *= FX12;   // rows 0-2: the raw coordinates' scale
+         std::memcpy(into.mtx[k].m, t.m, sizeof t.m);
+         into.mtx[k].persp = persp ? 1 : 0;
+@@ -3888,6 +3914,7 @@ int gx_take_record(GxRecord &into) {
+     return 1;
+ }
+ 
++
+ /* SM64DS_MAT_LOG=1: once, after the first full frame is assembled, the
+    LIGHTING side of the same picture -- every distinct POLYGON_ATTR, DIF_AMB
+    and SPE_EMI word that reached exec(), the light table the engine is
+-- 
+2.55.0.windows.5
+

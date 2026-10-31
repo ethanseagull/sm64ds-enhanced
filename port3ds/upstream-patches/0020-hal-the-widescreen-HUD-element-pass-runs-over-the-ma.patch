@@ -1,0 +1,127 @@
+From 3fda6affd5cffce9bd09f174cf529c91b73ad409 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 23:28:26 -0700
+Subject: [PATCH] hal: the widescreen HUD element pass runs over the marked
+ rows only
+
+hudelem::resolve made four whole-plane passes (two dilations, labelling,
+extents) every wide frame though the HUD sits on a few bands of rows. The
+marks are now found once and the passes run from kBridgeY above the first
+to kBridgeY below the last; every other row's labels are zero, as they were.
+Output identical (3DS regression screenshots), the 3DS widescreen build's
+compositor 12.2 -> 2.9 ms a frame in Castle Grounds (Azahar).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 50 +++++++++++++++++++++++++--------
+ 1 file changed, 39 insertions(+), 11 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index 99cfec99f..ccf71a089 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -1296,22 +1296,45 @@ void unite(int a, int b) {
+ // wholly inside a band keeps exactly that band's offset.
+ void resolve(int band_l, int band_r, int margin)
+ {
++    // THE MARKS, ONCE, AND THE ROWS THEY ARE ON (3DS widescreen lane). The HUD
++    // occupies a few bands of rows, and a row with no mark within kBridgeY of
++    // it can hold no dilated pixel and so no label. The passes below run over
++    // the rows from kBridgeY above the first mark to kBridgeY below the last
++    // and leave every other row's labels zero, which is exactly what the four
++    // whole-plane passes gave them; the mark test itself is made once here and
++    // read by the dilation and the extents. Output identical, a fraction of
++    // the work when the marks are sparse (before it, this pass was ~17% of the
++    // 3DS main thread's samples in a Bob-omb Battlefield frame, in Azahar).
++    static uint8_t on[192][256];
++    int ymin = 192, ymax = -1;
++    for (int y = 0; y < 192; ++y) {
++        bool any = false;
++        for (int x = 0; x < 256; ++x) {
++            const bool m = g_a[y][x].hit && !msg_layer_px(y, x) && !(g_hud_erase && g_hud_row_live && g_hud_row[y][x]);
++            on[y][x] = m ? 1 : 0;
++            any |= m;
++        }
++        if (any) { if (y < ymin) ymin = y; ymax = y; }
++    }
++    const int ylo = ymin - kBridgeY < 0 ? 0 : ymin - kBridgeY;
++    const int yhi = ymax + kBridgeY > 191 ? 191 : ymax + kBridgeY;   // < ylo when there is no mark
++    for (int y = 0; y < 192; ++y)
++        if (y < ylo || y > yhi) std::memset(g_lbl[y], 0, sizeof g_lbl[y]);
++
+     // Pass 1: horizontal dilation. A running count of "columns since the last
+     // set pixel" turns a left-to-right sweep into a one-sided dilation, and the
+     // right-to-left sweep completes it, so the whole radius costs two adds per
+     // pixel rather than a kBridgeX-wide window scan at each one.
+     static uint8_t dil[192][256];
+-    for (int y = 0; y < 192; ++y) {
++    for (int y = ylo; y <= yhi; ++y) {
+         int run = kBridgeX + 1;
+         for (int x = 0; x < 256; ++x) {
+-            const bool on = g_a[y][x].hit && !msg_layer_px(y, x) && !(g_hud_erase && g_hud_row_live && g_hud_row[y][x]);
+-            run = on ? 0 : (run + 1);
++            run = on[y][x] ? 0 : (run + 1);
+             dil[y][x] = (run <= kBridgeX) ? 1 : 0;
+         }
+         run = kBridgeX + 1;
+         for (int x = 255; x >= 0; --x) {
+-            const bool on = g_a[y][x].hit && !msg_layer_px(y, x) && !(g_hud_erase && g_hud_row_live && g_hud_row[y][x]);
+-            run = on ? 0 : (run + 1);
++            run = on[y][x] ? 0 : (run + 1);
+             if (run <= kBridgeX) dil[y][x] = 1;
+         }
+     }
+@@ -1329,17 +1352,22 @@ void resolve(int band_l, int band_r, int margin)
+     // captured pixels by exactly that rectangle in order to measure the
+     // elements the placement actually acted on. A checker grouping by a
+     // different rule from the code is measuring its own opinion.
++    //
++    // The sweeps start and end at the band's edges: outside it there is no
++    // mark, so a sweep from the plane's edge would arrive there with its run
++    // still past kBridgeY, which is where these start it.
+     static uint8_t vsrc[192][256];
+-    std::memcpy(vsrc, dil, sizeof(vsrc));
++    if (yhi >= ylo)
++        std::memcpy(vsrc[ylo], dil[ylo], (size_t)(yhi - ylo + 1) * sizeof vsrc[0]);
+     for (int x = 0; x < 256; ++x) {
+         int run = kBridgeY + 1;
+-        for (int y = 0; y < 192; ++y) {
++        for (int y = ylo; y <= yhi; ++y) {
+             if (vsrc[y][x]) { run = 0; continue; }
+             ++run;
+             if (run <= kBridgeY) dil[y][x] = 1;
+         }
+         run = kBridgeY + 1;
+-        for (int y = 191; y >= 0; --y) {
++        for (int y = yhi; y >= ylo; --y) {
+             if (vsrc[y][x]) { run = 0; continue; }
+             ++run;
+             if (run <= kBridgeY) dil[y][x] = 1;
+@@ -1351,7 +1379,7 @@ void resolve(int band_l, int band_r, int margin)
+     // element that the dilation only just closed.
+     g_nlab = 1;
+     g_par[0] = 0;
+-    for (int y = 0; y < 192; ++y) {
++    for (int y = ylo; y <= yhi; ++y) {
+         for (int x = 0; x < 256; ++x) {
+             if (!dil[y][x]) { g_lbl[y][x] = 0; continue; }
+             int best = 0;
+@@ -1380,13 +1408,13 @@ void resolve(int band_l, int band_r, int margin)
+     // the band rule did, instead of a margin shortened by the dilation radius.
+     static int x0[kMaxLabels], x1[kMaxLabels];
+     for (int i = 0; i < g_nlab; ++i) { x0[i] = 256; x1[i] = -1; }
+-    for (int y = 0; y < 192; ++y) {
++    for (int y = ylo; y <= yhi; ++y) {
+         for (int x = 0; x < 256; ++x) {
+             const int l = g_lbl[y][x];
+             if (!l) continue;
+             const int r = find_root(l);
+             g_lbl[y][x] = (int16_t)r;
+-            if (!g_a[y][x].hit || msg_layer_px(y, x) || (g_hud_erase && g_hud_row_live && g_hud_row[y][x])) continue;
++            if (!on[y][x]) continue;
+             if (x < x0[r]) x0[r] = x;
+             if (x > x1[r]) x1[r] = x;
+         }
+-- 
+2.55.0.windows.5
+

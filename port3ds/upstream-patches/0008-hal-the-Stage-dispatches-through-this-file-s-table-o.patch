@@ -1,0 +1,44 @@
+From ad9c0be185847b19d8e69374410cf445c1c340ca Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Wed, 14 Oct 2026 15:47:07 -0700
+Subject: [PATCH 08/13] hal: the Stage dispatches through this file's table on
+ the 3DS
+
+On the PC the Stage ctor's last store installs hal/stage_bridges.cpp's
+_ZTV5Stage, which hal_fill_stage_vtable fills (slot 0 the host boot body
+st_init, the ROM's own bodies elsewhere). The 3DS build compiles Stage's key
+function from src/, so GCC emits the class's real table and the ctor installs
+that: slot 0 became the ROM's Stage::InitResources, the route this file does
+not run. Under SM64DS_HOST_3DS port_stage_create points the Stage at this
+file's table, as on the PC.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/stage_bridges.cpp | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/port/hal/stage_bridges.cpp b/port/hal/stage_bridges.cpp
+index bb3b54cb4..a57c2e71e 100644
+--- a/port/hal/stage_bridges.cpp
++++ b/port/hal/stage_bridges.cpp
+@@ -1234,6 +1234,17 @@ extern "C" void *port_stage_create(void)
+         std::fprintf(stderr, "FATAL: Stage::Stage returned null\n");
+         std::abort();
+     }
++#if defined(SM64DS_HOST_3DS)
++    /* THE TABLE THE STAGE DISPATCHES THROUGH. On the PC the ctor's last store
++       installs this file's _ZTV5Stage, the table hal_fill_stage_vtable just
++       filled (slot 0 the boot body, the ROM's own bodies in the rest). The 3DS
++       build compiles Stage's key function from src/, so GCC emits the class's
++       real table and the ctor installs THAT one: slot 0 would be the ROM's
++       Stage::InitResources, which this file does not run (see the lifecycle
++       seat below). Point the Stage at this file's table, as on the PC. ROM
++       slot n is element n here and Itanium slot n in GCC's dispatch alike. */
++    *(void ***)g_stage = _ZTV5Stage;
++#endif
+ 
+     /* The tree head, asserted rather than assumed. The Stage is built with
+        data_020a4b6c[0] still null, so func_0203b438 takes its no-parent branch
+-- 
+2.55.0.windows.5
+

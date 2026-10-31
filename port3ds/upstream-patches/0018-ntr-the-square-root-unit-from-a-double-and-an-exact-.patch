@@ -1,0 +1,64 @@
+From b6379ed12456d2f57abc5e8f9fbbf97739f57f94 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Fri, 16 Oct 2026 21:22:31 -0700
+Subject: [PATCH] ntr: the square-root unit from a double and an exact
+ correction
+
+isqrt64 was a 32-step restoring loop in 64-bit arithmetic, a few hundred
+cycles a call on the 3DS's ARM11; the game normalises its vectors through
+the DS unit (~4% of a Bob-omb Battlefield frame in a profile). The
+double's square root is within a unit or two of floor(sqrt(v)) and two
+loops make it exact, so the result is the same for every argument.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/ntr/io.cpp | 26 ++++++++++++++------------
+ 1 file changed, 14 insertions(+), 12 deletions(-)
+
+diff --git a/port/ntr/io.cpp b/port/ntr/io.cpp
+index 94e29826a..6c9d6b69b 100644
+--- a/port/ntr/io.cpp
++++ b/port/ntr/io.cpp
+@@ -9,6 +9,7 @@
+ #include "ntr/ipc.h"
+ #include "ntr/ppu_audit.h"
+ 
++#include <cmath>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+@@ -238,18 +239,19 @@ void run_divide() {
+ }
+ 
+ uint32_t isqrt64(uint64_t v) {
+-    // Integer floor(sqrt(v)) by restoring bit-by-bit; matches the DS unit's result.
+-    uint64_t rem = 0, root = 0;
+-    for (int i = 0; i < 32; ++i) {
+-        root <<= 1;
+-        rem = (rem << 2) | (v >> 62);
+-        v <<= 2;
+-        if (rem > root) {
+-            rem -= root | 1;
+-            root += 2;
+-        }
+-    }
+-    return static_cast<uint32_t>(root >> 1);
++    // Integer floor(sqrt(v)), the DS unit's result. The double's square root
++    // is within a unit or two of it (53 bits of a 64-bit argument), and the
++    // two loops make it exact: r*r <= v < (r+1)*(r+1), with r kept at or under
++    // 0xFFFFFFFF so neither square overflows. It replaced a 32-step restoring
++    // loop in 64-bit arithmetic, a few hundred cycles a call on the 3DS's
++    // ARM11 (the game normalises its vectors through this unit: ~4% of a
++    // Bob-omb Battlefield frame in a profile).
++    if (v == 0) return 0;
++    uint64_t r = static_cast<uint64_t>(std::sqrt(static_cast<double>(v)));
++    if (r > 0xFFFFFFFFull) r = 0xFFFFFFFFull;
++    while (r * r > v) --r;
++    while (r < 0xFFFFFFFFull && (r + 1) * (r + 1) <= v) ++r;
++    return static_cast<uint32_t>(r);
+ }
+ 
+ unsigned long g_sqrt_runs;
+-- 
+2.49.0
+

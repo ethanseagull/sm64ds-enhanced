@@ -1,0 +1,54 @@
+From d01454b8a54e008284786d33de19c6349e7a9642 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sun, 25 Oct 2026 09:18:26 -0700
+Subject: [PATCH] hal: MultiCopy32Bytes and MultiStore32Bytes through memcpy
+ and memset
+
+Apart regions copy with the library's block copy (an overlapping copy keeps
+the forward loop OAM::Reset relies on), a fill of equal bytes with memset.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/model_host.cpp | 9 +++++++++
+ port/hal/scene_boot.cpp | 5 +++++
+ 2 files changed, 14 insertions(+)
+
+diff --git a/port/hal/model_host.cpp b/port/hal/model_host.cpp
+index 18b93b21b..8ba50d814 100644
+--- a/port/hal/model_host.cpp
++++ b/port/hal/model_host.cpp
+@@ -97,6 +97,15 @@ void MultiCopy32Bytes(int *src, int *dst, int len)
+        Inert unless SM64DS_PPU_AUDIT is set; see ntr/ppu_audit.h. */
+     ntr::ppu_audit_note_copy32((unsigned)(size_t)src, (unsigned)(size_t)dst,
+                                (unsigned)len);
++    /* Apart, the library's block copy (the ARM11 ran this a word at a time:
++       the boot scene's two 23 KB tile moves a frame). Overlapping, the
++       forward loop: OAM::Reset copies a block onto the one after it to
++       replicate it, as the DS's forward ldm/stm does. */
++    const size_t bytes = (size_t)(len / 4) * 4;
++    if ((const char *)dst + bytes <= (const char *)src || (const char *)src + bytes <= (const char *)dst) {
++        memcpy(dst, src, bytes);
++        return;
++    }
+     for (int i = 0; i < len / 4; ++i) dst[i] = src[i];
+ }
+ 
+diff --git a/port/hal/scene_boot.cpp b/port/hal/scene_boot.cpp
+index c1302a34c..e1ac387ff 100644
+--- a/port/hal/scene_boot.cpp
++++ b/port/hal/scene_boot.cpp
+@@ -884,6 +884,11 @@ extern "C" void Matrix3x3_LoadIdentity(int *m)
+ // PORT_HOST_ABI: hand-asm primitive; src/MultiStore32Bytes.c is an `asm void` block MSVC cannot parse (section 1b), transcribed here rather than compiled.
+ extern "C" void MultiStore32Bytes(unsigned val, int *dst, int len)
+ {
++    // a word of four equal bytes (the boot scene's clears: 0) is the library's fill
++    if (len >= 4 && val == (val & 0xFFu) * 0x01010101u) {
++        memset(dst, (int)(val & 0xFFu), (size_t)(len & ~3));
++        return;
++    }
+     for (int i = 0; i + 4 <= len; i += 4)
+         *dst++ = (int)val;
+ }
+-- 
+2.55.0.windows.5
+

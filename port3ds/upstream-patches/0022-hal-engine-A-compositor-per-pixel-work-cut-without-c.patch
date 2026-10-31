@@ -1,0 +1,317 @@
+From d2d3347267591922207a6c7961e252c7cc4caea8 Mon Sep 17 00:00:00 2001
+From: sm64ds-3ds <244728604+ethanseagull@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 05:40:12 -0700
+Subject: [PATCH] hal: engine A compositor per-pixel work, cut without changing
+ a pixel
+
+- hudelem::resolve (widescreen only): skips g_a_clean rows; the passes run
+  over the rows within kBridgeY of a mark (not the whole band from the first
+  mark to the last); the vertical dilation sweeps a row at a time with a run
+  per column. Same labels and anchors (checked against the old function on
+  every frame of the 3DS widescreen regression runs: 0 differences).
+- The BG loop reads each tile's screen entry once per run of its pixels and
+  the BG palette from a table expanded once a frame (sample_bg_at). Checked
+  with SM64DS_TWOD_VERIFY=1: 0 mismatching composites.
+- hide_3d_outside_windows: each host column's DS column from a table built
+  once per call (it was a call to present_h() and a divide per host pixel).
+- The final blit: ds_col_x0 / ds_row_y0 from tables built once a frame.
+- bm_fill_default: the card verdict from a 64-entry table, and a row whose
+  window mask is the last built row's is copied.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ port/hal/message_compositor.cpp | 165 +++++++++++++++++++++++++-------
+ 1 file changed, 133 insertions(+), 32 deletions(-)
+
+diff --git a/port/hal/message_compositor.cpp b/port/hal/message_compositor.cpp
+index ccf71a089..1fac46462 100644
+--- a/port/hal/message_compositor.cpp
++++ b/port/hal/message_compositor.cpp
+@@ -484,6 +484,39 @@ bool sample_bg(const BgConfig &c, int x, int y, uint32_t &out) {
+     return true;
+ }
+ 
++// sample_bg for the BG loop: the same answer, with the line's map row and the
++// last screen entry kept between calls (a tile's 8 pixels share one) and the
++// palette read from pal32, the standard BG palette expanded once a frame.
++struct BgCursor { int py = 0; int tx = -1; uint16_t se = 0; };
++inline void bg_cursor_line(const BgConfig &c, int y, BgCursor &k) {
++    k.py = (y + c.vofs) & (c.tiles_h * 8 - 1);
++    k.tx = -1;
++}
++inline bool sample_bg_at(const BgConfig &c, BgCursor &k, int x, const uint32_t *pal32,
++                         uint32_t &out) {
++    const int px = (x + c.hofs) & (c.tiles_w * 8 - 1);
++    const int tx = px >> 3;
++    if (tx != k.tx) { k.tx = tx; k.se = rd16(screen_entry_addr(c, tx, k.py >> 3)); }
++    const uint16_t se = k.se;
++    const int tile = se & 0x3FF;
++    int fx = px & 7, fy = k.py & 7;
++    if (se & 0x400) fx = 7 - fx;
++    if (se & 0x800) fy = 7 - fy;
++    uint32_t index;
++    if (c.bpp8) {
++        index = *reinterpret_cast<volatile uint8_t *>(c.chars + tile * 64 + fy * 8 + fx);
++        if (index == 0) return false;
++    } else {
++        const uint8_t pair =
++            *reinterpret_cast<volatile uint8_t *>(c.chars + tile * 32 + fy * 4 + (fx >> 1));
++        index = (fx & 1) ? (pair >> 4) : (pair & 0xF);
++        if (index == 0) return false;
++        index += ((se >> 12) & 0xF) * 16;
++    }
++    out = pal32[index];
++    return true;
++}
++
+ // ---- the window unit (engine A, register base 0x04000000) ------------------
+ // Mirror of ppu_sub.cpp's read_windows/window_mask. Bits 0..3 BG0..BG3, bit 4
+ // OBJ, bit 5 colour effect. Edges are exclusive; a right/bottom at or before
+@@ -856,16 +889,21 @@ void hide_3d_outside_windows(uint32_t dispcnt, const Windows &w, ntr::Framebuffe
+     const uint32_t bd = bgr555(rd16(kPlttBase));
+     const int sx = ntr::active_w / 256;
+     const int margin = ntr::active_w - ds_col_x0(256);
++    /* each host column's DS column, once per call (a call and a divide a
++       pixel otherwise, and the 3DS's ARM11 has no divide) */
++    static int s_dsx[ntr::SCREEN_W];
++    for (int hx = 0; hx < ntr::active_w; ++hx) {
++        if (ntr::widescreen) {
++            const int d = hx - margin / 2;
++            s_dsx[hx] = d < 0 ? -1 : ds_col_of(d);
++        } else {
++            s_dsx[hx] = hx / sx;
++        }
++    }
+     for (int hy = 0; hy < ntr::active_h; ++hy) {
+         const int y = ds_row_of(hy);
+         for (int hx = 0; hx < ntr::active_w; ++hx) {
+-            int x;
+-            if (ntr::widescreen) {
+-                const int d = hx - margin / 2;
+-                x = d < 0 ? -1 : ds_col_of(d);
+-            } else {
+-                x = hx / sx;
+-            }
++            const int x = s_dsx[hx];
+             const bool h = (x >= 0 && x < 256 && y < 192) ? hid[y][x] != 0 : out_hidden;
+             if (!h) continue;
+             fb.px[hy][hx] = bd;
+@@ -1306,20 +1344,38 @@ void resolve(int band_l, int band_r, int margin)
+     // the work when the marks are sparse (before it, this pass was ~17% of the
+     // 3DS main thread's samples in a Bob-omb Battlefield frame, in Azahar).
+     static uint8_t on[192][256];
++    bool marked[192];
+     int ymin = 192, ymax = -1;
+     for (int y = 0; y < 192; ++y) {
+         bool any = false;
+-        for (int x = 0; x < 256; ++x) {
+-            const bool m = g_a[y][x].hit && !msg_layer_px(y, x) && !(g_hud_erase && g_hud_row_live && g_hud_row[y][x]);
+-            on[y][x] = m ? 1 : 0;
+-            any |= m;
++        if (g_a_clean[y]) {   // no hit in the row: no mark
++            std::memset(on[y], 0, sizeof on[y]);
++        } else {
++            for (int x = 0; x < 256; ++x) {
++                const bool m = g_a[y][x].hit && !msg_layer_px(y, x) && !(g_hud_erase && g_hud_row_live && g_hud_row[y][x]);
++                on[y][x] = m ? 1 : 0;
++                any |= m;
++            }
+         }
++        marked[y] = any;
+         if (any) { if (y < ymin) ymin = y; ymax = y; }
+     }
+     const int ylo = ymin - kBridgeY < 0 ? 0 : ymin - kBridgeY;
+     const int yhi = ymax + kBridgeY > 191 ? 191 : ymax + kBridgeY;   // < ylo when there is no mark
++    // A row with no mark within kBridgeY of it holds no dilated pixel and so
++    // no label, wherever it sits (the HUD's top rows and the red coin row at
++    // the bottom leave most of the band between them empty). The passes run
++    // over the near rows only; across a far row every column's run is already
++    // past kBridgeY, which is where a sweep restarts it.
++    bool near[192];
++    {
++        int last = -1000;
++        for (int y = 0; y < 192; ++y) { if (marked[y]) last = y; near[y] = y - last <= kBridgeY; }
++        last = 1000;
++        for (int y = 191; y >= 0; --y) { if (marked[y]) last = y; if (last - y <= kBridgeY) near[y] = true; }
++    }
+     for (int y = 0; y < 192; ++y)
+-        if (y < ylo || y > yhi) std::memset(g_lbl[y], 0, sizeof g_lbl[y]);
++        if (!near[y]) std::memset(g_lbl[y], 0, sizeof g_lbl[y]);
+ 
+     // Pass 1: horizontal dilation. A running count of "columns since the last
+     // set pixel" turns a left-to-right sweep into a one-sided dilation, and the
+@@ -1327,6 +1383,8 @@ void resolve(int band_l, int band_r, int margin)
+     // pixel rather than a kBridgeX-wide window scan at each one.
+     static uint8_t dil[192][256];
+     for (int y = ylo; y <= yhi; ++y) {
++        if (!near[y]) continue;
++        if (!marked[y]) { std::memset(dil[y], 0, sizeof dil[y]); continue; }
+         int run = kBridgeX + 1;
+         for (int x = 0; x < 256; ++x) {
+             run = on[y][x] ? 0 : (run + 1);
+@@ -1355,22 +1413,31 @@ void resolve(int band_l, int band_r, int margin)
+     //
+     // The sweeps start and end at the band's edges: outside it there is no
+     // mark, so a sweep from the plane's edge would arrive there with its run
+-    // still past kBridgeY, which is where these start it.
++    // still past kBridgeY, which is where these start it. They go a row at a
++    // time with a run per column (the same counts as a sweep down each
++    // column, read in memory order).
+     static uint8_t vsrc[192][256];
+-    if (yhi >= ylo)
+-        std::memcpy(vsrc[ylo], dil[ylo], (size_t)(yhi - ylo + 1) * sizeof vsrc[0]);
+-    for (int x = 0; x < 256; ++x) {
+-        int run = kBridgeY + 1;
++    for (int y = ylo; y <= yhi; ++y)
++        if (near[y]) std::memcpy(vsrc[y], dil[y], sizeof vsrc[0]);
++    {
++        uint8_t run[256];
++        std::memset(run, kBridgeY + 1, sizeof run);
+         for (int y = ylo; y <= yhi; ++y) {
+-            if (vsrc[y][x]) { run = 0; continue; }
+-            ++run;
+-            if (run <= kBridgeY) dil[y][x] = 1;
++            if (!near[y]) { std::memset(run, kBridgeY + 1, sizeof run); continue; }
++            for (int x = 0; x < 256; ++x) {
++                if (vsrc[y][x]) { run[x] = 0; continue; }
++                if (run[x] <= kBridgeY) ++run[x];
++                if (run[x] <= kBridgeY) dil[y][x] = 1;
++            }
+         }
+-        run = kBridgeY + 1;
++        std::memset(run, kBridgeY + 1, sizeof run);
+         for (int y = yhi; y >= ylo; --y) {
+-            if (vsrc[y][x]) { run = 0; continue; }
+-            ++run;
+-            if (run <= kBridgeY) dil[y][x] = 1;
++            if (!near[y]) { std::memset(run, kBridgeY + 1, sizeof run); continue; }
++            for (int x = 0; x < 256; ++x) {
++                if (vsrc[y][x]) { run[x] = 0; continue; }
++                if (run[x] <= kBridgeY) ++run[x];
++                if (run[x] <= kBridgeY) dil[y][x] = 1;
++            }
+         }
+     }
+ 
+@@ -1380,6 +1447,7 @@ void resolve(int band_l, int band_r, int margin)
+     g_nlab = 1;
+     g_par[0] = 0;
+     for (int y = ylo; y <= yhi; ++y) {
++        if (!near[y]) continue;   // labels zeroed above
+         for (int x = 0; x < 256; ++x) {
+             if (!dil[y][x]) { g_lbl[y][x] = 0; continue; }
+             int best = 0;
+@@ -1409,6 +1477,7 @@ void resolve(int band_l, int band_r, int margin)
+     static int x0[kMaxLabels], x1[kMaxLabels];
+     for (int i = 0; i < g_nlab; ++i) { x0[i] = 256; x1[i] = -1; }
+     for (int y = ylo; y <= yhi; ++y) {
++        if (!near[y]) continue;
+         for (int x = 0; x < 256; ++x) {
+             const int l = g_lbl[y][x];
+             if (!l) continue;
+@@ -2472,8 +2541,18 @@ void bm_fill_default(uint32_t dispcnt, const Windows &w) {
+     auto verdict = [first](unsigned layer, unsigned wm) -> unsigned char {
+         return ((wm & 0x20) && (first & (1u << layer))) ? 1 : 0;
+     };
++    /* the card's code depends on the six mask bits alone: a table of 64 */
++    unsigned char card_code[64];
++    for (unsigned wm = 0; wm < 64; ++wm)
++        card_code[wm] = (unsigned char)(verdict(0u, wm) | (verdict(5u, wm) << 1));
+     unsigned char wrow[256];
+     int wrow_y = -1;
++    /* the card's row is a function of the line's window mask alone, and the
++       windows are rectangles: a row whose mask is the last built row's is
++       that row again */
++    const unsigned char *card_prev = nullptr;
++    bool card_prev_in = false;
++    unsigned char card_prev_w[256];
+     for (int hy = 0; hy < ntr::active_h; ++hy) {
+         const int y = ds_row_of(hy);
+         if (y < 192 && y != wrow_y) {
+@@ -2481,13 +2560,26 @@ void bm_fill_default(uint32_t dispcnt, const Windows &w) {
+             wrow_y = y;
+         }
+         unsigned char *row = g_bm + (size_t)hy * ntr::SCREEN_W;
++        if (card) {
++            const bool in = y < 192;
++            if (card_prev && in == card_prev_in &&
++                (!in || std::memcmp(wrow, card_prev_w, sizeof wrow) == 0)) {
++                std::memcpy(row, card_prev, (size_t)ntr::active_w);
++                continue;
++            }
++            for (int hx = 0; hx < ntr::active_w; ++hx) {
++                const int x = s_dsx[hx];
++                const unsigned wm = (x >= 0 && x < 256 && in) ? wrow[x] : out_mask;
++                row[hx] = card_code[wm & 0x3Fu];
++            }
++            card_prev = row;
++            card_prev_in = in;
++            if (in) std::memcpy(card_prev_w, wrow, sizeof wrow);
++            continue;
++        }
+         for (int hx = 0; hx < ntr::active_w; ++hx) {
+             const int x = s_dsx[hx];
+             const unsigned wm = (x >= 0 && x < 256 && y < 192) ? wrow[x] : out_mask;
+-            if (card) {
+-                row[hx] = (unsigned char)(verdict(0u, wm) | (verdict(5u, wm) << 1));
+-                continue;
+-            }
+             const bool is3d = shown3d
+                 && (clear_opaque || cover[(size_t)hy * ntr::SCREEN_W + hx]);
+             row[hx] = verdict(is3d ? 0u : 5u, wm);
+@@ -3454,15 +3546,19 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+         bg_loop_ref(g_a, bgs, win, lmask, bl);
+     } else if (nbg) {
+         unsigned char wrow[256];
++        uint32_t pal32[256];
++        for (int i = 0; i < 256; ++i) pal32[i] = bgr555(rd16(kPlttBase + i * 2));
++        BgCursor cur[4];
+         for (int y = 0; y < 192; ++y) {
+             window_mask_row(win, y, wrow);
++            for (int k = 0; k < nbg; ++k) bg_cursor_line(bgs[bgorder[k]], y, cur[k]);
+             for (int x = 0; x < 256; ++x) {
+                 const unsigned mask = wrow[x];
+                 for (int k = 0; k < nbg; ++k) {
+                     const int bg = bgorder[k];
+                     if (!(mask & (1u << bg))) continue;
+                     uint32_t s;
+-                    if (sample_bg(bgs[bg], x, y, s)) {
++                    if (sample_bg_at(bgs[bg], cur[k], x, pal32, s)) {
+                         // BGs draw far->near (prio 3..0, then bg 3..0), so when
+                         // a 1st-target BG writes, g_a already holds the layer
+                         // directly below it. Mode-1 alpha over a 2nd-target 2D
+@@ -3887,6 +3983,11 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+     uint32_t *const pre = ntr::gx_aa_preimage();
+     uint32_t kept = 0, buried = 0;
+     g_cz.mark(4);
++    /* the host column / row each DS column / row starts at, once a frame
++       (ds_col_x0 / ds_row_y0 are a call and a divide each) */
++    static int s_colx0[257], s_rowy0[193];
++    for (int i = 0; i <= 256; ++i) s_colx0[i] = ds_col_x0(i);
++    for (int i = 0; i <= 192; ++i) s_rowy0[i] = ds_row_y0(i);
+     for (int pass = 0; pass < 2; ++pass) {
+     if (pass && !g_hud_row_live) break;
+     /* pass 0 = the DS plane, pass 1 = the moved coin block's own plane (drawn after, so it covers what is under it) */
+@@ -3905,8 +4006,8 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                byte-for-byte the old code. */
+             int bw, hx0;
+             if (ntr::widescreen) {
+-            const int ux0 = ds_col_x0(x);
+-            bw = ds_col_x0(x + 1) - ux0;
++            const int ux0 = s_colx0[x];
++            bw = s_colx0[x + 1] - ux0;
+             /* THE REANCHOR IS FOR A SPARSE HUD OVER A WIDE 3D VIEW, and only
+                there. With a 3D layer in the picture (shown3d) the bands it opens
+                between the HUD clusters are filled by the 3D field, so pushing the
+@@ -3983,7 +4084,7 @@ extern "C" void port_message_composite_engine_a(void *fbp)
+                viewport and the window test use (ds_row_y0), so a DS row is
+                one screen row in every layer whether or not active_h is a
+                whole multiple of 192. */
+-            const int hy0 = ds_row_y0(y), hy1 = ds_row_y0(y + 1);
++            const int hy0 = s_rowy0[y], hy1 = s_rowy0[y + 1];
+             const unsigned lcow = gc.owner;
+             const int lcv = lc_overlay_verdict(lcow);
+             if (lcv == 2) continue;
+-- 
+2.55.0.windows.5
+
