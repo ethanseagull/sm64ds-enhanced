@@ -26,7 +26,7 @@ yourself from your own cartridge dump.
 
 ## You'll need
 
-- Windows 10 or 11
+- Windows 10 or 11, or a Mac with macOS 11 or later
 - Your own dump of the European release (game code ASMP), as an `.nds` file
 - A 3DS or 2DS with custom firmware and FBI
 
@@ -45,6 +45,54 @@ yourself from your own cartridge dump.
 
 The `.cia` has Nintendo's game data in it, so keep it to your own consoles.
 
+### On a Mac
+
+The Mac builder is the same builder as a Mac app, `SM64DS Enhanced Builder.app`,
+for macOS 11 or later on Apple silicon or Intel.
+
+1. Download `SM64DS-Enhanced-Builder-<version>-mac.zip` from
+   [Releases](../../releases), or make the app yourself with
+   `python3 port3ds/builder/mac/package.py`, which takes about a minute (see
+   [port3ds/builder/mac](port3ds/builder/mac/README.md)). Double-click the zip
+   to unzip it, and drag the app to Applications.
+2. Open the app. The first time, macOS may not let you; see
+   [below](#if-macos-wont-open-it).
+3. Pick your dump, drag it onto the window, or drop it on the app's Dock icon.
+   If your dump is on your Desktop or in Documents or Downloads, macOS asks
+   whether the builder can use that folder; allow it, so that it can save the
+   `.cia` there.
+4. Choose your settings and click Build (⌘B), as on Windows.
+
+#### If macOS won't open it
+
+The app isn't notarized by Apple, so on any Mac it was downloaded or copied to,
+macOS blocks it the first time, saying it couldn't check the app for malware.
+You only have to allow it once. (On the Mac that made it, it opens straight
+away.)
+
+On **macOS 15 or later**:
+
+1. Double-click the app, and click Done when macOS says it couldn't verify it.
+2. Open System Settings > Privacy & Security, and scroll down to Security.
+3. Next to "SM64DS Enhanced Builder" was blocked, click Open Anyway. (The
+   button is there for about an hour after you tried to open the app.)
+4. Click Open Anyway again, and enter your password or use Touch ID.
+
+On **macOS 11 to 14**, Control-click (or right-click) the app, choose Open, and
+click Open.
+
+**In Terminal**, on any version: if there's no Open Anyway, or macOS says the
+app is damaged and can't be opened, remove the mark macOS puts on downloaded
+files, then open the app as usual:
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/SM64DS Enhanced Builder.app"
+```
+
+If the app isn't in Applications, type `xattr -dr com.apple.quarantine ` (with
+the space) and drag the app onto the Terminal window for its path. Only do this
+for a copy from this project's releases, or one you made yourself.
+
 ## Source
 
 Everything in the release is built from this repository:
@@ -54,6 +102,9 @@ Everything in the release is built from this repository:
   `upstream-patches/`, the changes to the decompilation's PC port.
 - `port3ds/builder/` is the builder. Its `.exe` is built by
   [GitHub Actions](.github/workflows/builder.yml) from this source.
+  `port3ds/builder/mac/` is the same builder for macOS, in Swift, and its zip
+  is built for each release by
+  [GitHub Actions](.github/workflows/mac-builder.yml).
 - [docs/BUILDING.md](docs/BUILDING.md) says how to build the game yourself.
 
 The code here is under the [MIT licence](LICENSE). The decompilation and PC

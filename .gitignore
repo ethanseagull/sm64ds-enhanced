@@ -1,0 +1,15 @@
+# game dumps and what the builder makes from them: never commit these
+*.nds
+*.z64
+*.n64
+*.v64
+*.cia
+*.cia.log
+
+# the Mac builder's build folder (port3ds/builder/mac/package.py)
+port3ds/builder/mac/build/
+
+.DS_Store
+
+# Python
+__pycache__/

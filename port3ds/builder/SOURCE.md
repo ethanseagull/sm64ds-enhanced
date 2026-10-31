@@ -19,6 +19,9 @@ The source of `SM64DS-Enhanced-Builder.exe` from the release:
   makerom and bannertool. It refuses to package if any file it ships contains
   the game's bytes.
 - `builder.ico`: the file's icon, drawn by `make_icon.cs`.
+- `mac/`: the same builder for macOS, in Swift, and the `package.py` that
+  makes the app from the release. [GitHub Actions](../../.github/workflows/mac-builder.yml)
+  runs it for each release; see [mac/README.md](mac/README.md).
 
 The window's music and sounds aren't included here. Licences are in
 `THIRD-PARTY.txt` and `licenses/`.
