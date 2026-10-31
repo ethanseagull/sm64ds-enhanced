@@ -65,6 +65,17 @@ When the Windows builder's C# changes, port the change to the Swift here.
 `package.py` warns when it is given a release it hasn't been checked against,
 and refuses one with files or banner recipe lines it doesn't know.
 
+## Releases
+
+[`mac-builder.yml`](../../../.github/workflows/mac-builder.yml) builds the app
+on GitHub's macOS runners when a release is published, from the release's own
+source and its `SM64DS-Enhanced-Builder.zip`. It attaches
+`SM64DS-Enhanced-Builder-<version>-mac.zip` to the release, so the Mac and
+Windows builders in a release always carry the same game. After replacing a
+release's zip, run it again from the Actions tab (Mac builder > Run workflow).
+With "upload" off it only tries a build; the zip is kept as the run's
+`mac-builder` artifact either way.
+
 ## How it was checked
 
 With the European dump, against the Windows builder's own C# run under Mono:

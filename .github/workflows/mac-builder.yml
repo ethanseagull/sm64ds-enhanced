@@ -1,0 +1,98 @@
+# The Mac builder (port3ds/builder/mac), built on GitHub's macOS runners from
+# this repository's source and the release's builder files, and attached to the
+# release as SM64DS-Enhanced-Builder-<version>-mac.zip.
+#
+# It runs when a release is published, if the release has
+# SM64DS-Enhanced-Builder.zip. Run it by hand (Actions > Mac builder > Run
+# workflow) after replacing a release's zip, or with "upload" off to try a build:
+# the zip is kept as the mac-builder artifact either way.
+#
+# The app is signed ad hoc, not notarized, so macOS asks before it opens the
+# first time (the README says how to allow it). Notarizing it would need an
+# Apple Developer account, its Developer ID certificate as secrets, and
+# package.py --sign.
+name: Mac builder
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release to build it for, by tag, or latest
+        required: true
+        default: latest
+      source:
+        description: The repository whose release has SM64DS-Enhanced-Builder.zip (empty for this one)
+        required: false
+        default: ''
+      upload:
+        description: Attach the Mac zip to the release
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-builder-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: true
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write   # to attach the zip to the release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      SOURCE: ${{ inputs.source || github.repository }}
+      UPLOAD: ${{ github.event_name == 'release' || inputs.upload }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # A release published with gh has its assets before it is published; the
+      # retries are for one whose zip is attached just after.
+      - name: Get the release's builder files
+        id: zip
+        run: |
+          if [ "$TAG" = latest ]; then
+            TAG=$(gh release view --repo "$SOURCE" --json tagName --jq .tagName)
+            echo "TAG=$TAG" >> "$GITHUB_ENV"
+          fi
+          for try in 1 2 3 4 5 6; do
+            if gh release download "$TAG" --repo "$SOURCE" --pattern SM64DS-Enhanced-Builder.zip --dir dl; then
+              echo "found=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            [ "$GITHUB_EVENT_NAME" = release ] || break
+            sleep 20
+          done
+          if [ "$GITHUB_EVENT_NAME" = release ]; then
+            echo "::notice::Release $TAG has no SM64DS-Enhanced-Builder.zip, so there's no Mac builder to make."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Release $TAG of $SOURCE has no SM64DS-Enhanced-Builder.zip."
+            exit 1
+          fi
+
+      - name: Build the Mac app
+        if: steps.zip.outputs.found == 'true'
+        run: python -I port3ds/builder/mac/package.py --from dl/SM64DS-Enhanced-Builder.zip
+
+      - name: Keep the zip
+        if: steps.zip.outputs.found == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mac-builder
+          path: port3ds/builder/mac/build/SM64DS-Enhanced-Builder-*-mac.zip
+          if-no-files-found: error
+
+      - name: Attach it to the release
+        if: steps.zip.outputs.found == 'true' && env.UPLOAD == 'true'
+        run: gh release upload "$TAG" port3ds/builder/mac/build/SM64DS-Enhanced-Builder-*-mac.zip --repo "$GITHUB_REPOSITORY" --clobber

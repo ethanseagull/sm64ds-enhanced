@@ -50,7 +50,8 @@ The `.cia` has Nintendo's game data in it, so keep it to your own consoles.
 The Mac builder is the same builder as a Mac app, `SM64DS Enhanced Builder.app`,
 for macOS 11 or later on Apple silicon or Intel.
 
-1. Download the Mac zip if the release has one, or make the app yourself with
+1. Download `SM64DS-Enhanced-Builder-<version>-mac.zip` from
+   [Releases](../../releases), or make the app yourself with
    `python3 port3ds/builder/mac/package.py`, which takes about a minute (see
    [port3ds/builder/mac](port3ds/builder/mac/README.md)). Double-click the zip
    to unzip it, and drag the app to Applications.
@@ -101,7 +102,9 @@ Everything in the release is built from this repository:
   `upstream-patches/`, the changes to the decompilation's PC port.
 - `port3ds/builder/` is the builder. Its `.exe` is built by
   [GitHub Actions](.github/workflows/builder.yml) from this source.
-  `port3ds/builder/mac/` is the same builder for macOS, in Swift.
+  `port3ds/builder/mac/` is the same builder for macOS, in Swift, and its zip
+  is built for each release by
+  [GitHub Actions](.github/workflows/mac-builder.yml).
 - [docs/BUILDING.md](docs/BUILDING.md) says how to build the game yourself.
 
 The code here is under the [MIT licence](LICENSE). The decompilation and PC
