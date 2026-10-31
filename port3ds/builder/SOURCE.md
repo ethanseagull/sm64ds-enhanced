@@ -11,6 +11,9 @@ The source of `SM64DS-Enhanced-Builder.exe` from the release:
 - `Face.cs`: the 3D HOME Menu banner. `face/face.template` is the banner model
   with every value from the game zeroed out, and `face/face.recipe` says where
   each value goes; the builder fills them in from your dump.
+- `sm64ds_builder.py`: the builder for Linux and macOS (it runs on Windows
+  too), the four files above in Python. It makes the same `.cia`, byte for
+  byte; `--self-test` checks a computer gives the same results.
 - `build_exe.py`: compiles the `.exe` from those four files with the C#
   compiler that comes with Windows. The release's `.exe` is built this way by
   [GitHub Actions](../../.github/workflows/builder.yml).

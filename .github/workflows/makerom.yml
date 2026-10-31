@@ -1,0 +1,116 @@
+# makerom 0.19.0 for the Linux/Mac builder (SM64DS-Enhanced-Builder-Linux-Mac.zip),
+# built here from Project_CTR's source at the makerom-v0.19.0 tag. The official
+# Linux and Mac builds need glibc 2.38 and macOS 15; these run on glibc 2.17
+# (any Linux x86-64 since about 2014) and macOS 11. port3ds/builder/package.py
+# pins the sha256s of the binaries this made, and release.py checks their
+# minimums before every release.
+#
+# Run it by hand (Actions > makerom > Run workflow); the binaries are the
+# makerom artifact. makerom links CUE's blz, so it is GPL 3 or later.
+name: makerom
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REPO: https://github.com/3DSGuy/Project_CTR.git
+  COMMIT: e8f5f529c54ff9b22a2491a480ffa69206bf7b19   # tag makerom-v0.19.0
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the source
+        run: |
+          git init -q src
+          git -C src fetch -q --depth 1 "$REPO" "$COMMIT"
+          git -C src -c advice.detachedHead=false checkout -q FETCH_HEAD
+
+      # manylinux2014 is CentOS 7 with a newer gcc: glibc 2.17, and only the
+      # libstdc++ symbols that old systems have
+      - name: Build it on glibc 2.17
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w/src/makerom quay.io/pypa/manylinux2014_x86_64 bash -euc '
+            make -j4 PROJECT_PLATFORM_ARCH=x86_64 WARNFLAGS=-w deps
+            make -j4 PROJECT_PLATFORM_ARCH=x86_64 WARNFLAGS=-w all
+            mkdir -p /w/out/linux-x86_64
+            strip -o /w/out/linux-x86_64/makerom bin/makerom'
+          sudo chown -R "$(id -u)" out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: makerom-linux
+          path: out
+          if-no-files-found: error
+
+  mac:
+    runs-on: macos-latest
+    steps:
+      - name: Get the source
+        run: |
+          git init -q src
+          git -C src fetch -q --depth 1 "$REPO" "$COMMIT"
+          git -C src -c advice.detachedHead=false checkout -q FETCH_HEAD
+
+      - name: Build it for macOS 11, Apple silicon and Intel
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '11.0'
+        run: |
+          for arch in arm64 x86_64; do
+            cp -R src/makerom "build-$arch"
+            make -C "build-$arch" -j4 PROJECT_PLATFORM_ARCH=$arch WARNFLAGS=-w deps
+            make -C "build-$arch" -j4 PROJECT_PLATFORM_ARCH=$arch WARNFLAGS=-w all
+            mkdir -p "out/macos-$arch"
+            strip -S -x -o "out/macos-$arch/makerom" "build-$arch/bin/makerom"
+            codesign -s - -f "out/macos-$arch/makerom"
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: makerom-mac
+          path: out
+          if-no-files-found: error
+
+  # each runs where it should: the Linux one on old distributions, the Mac
+  # ones' minimum macOS read from the binaries (Actions has no macOS 11)
+  check-linux:
+    needs: linux
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: ['centos:7', 'ubuntu:18.04', 'ubuntu:22.04', 'debian:12']
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: makerom-linux
+          path: out
+      - name: makerom runs on ${{ matrix.image }}
+        run: |
+          chmod +x out/linux-x86_64/makerom
+          docker run --rm -v "$PWD/out:/o" ${{ matrix.image }} sh -c '/o/linux-x86_64/makerom -help 2>&1 | head -3' | tee log
+          grep -q 'CTR MAKEROM' log
+
+  check-mac:
+    needs: mac
+    runs-on: macos-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: makerom-mac
+          path: out
+      - name: Both run, and need at most macOS 11
+        run: |
+          set -eu
+          chmod +x out/*/makerom
+          for arch in arm64 x86_64; do
+            f="out/macos-$arch/makerom"
+            lipo -archs "$f" | grep -qx "$arch"
+            minos=$(otool -l "$f" | awk '/LC_BUILD_VERSION/{b=1} b&&/minos/{print $2; exit}')
+            echo "$arch: minos $minos"
+            [ "$minos" = 11.0 ]
+            arch -$arch "$f" -help 2>&1 | head -3 | tee log
+            grep -q 'CTR MAKEROM' log
+          done

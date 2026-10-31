@@ -26,11 +26,14 @@ yourself from your own cartridge dump.
 
 ## You'll need
 
-- Windows 10 or 11, or a Mac with macOS 11 or later
+- Windows 10 or 11, a Mac with macOS 11 or later, or Linux (x86-64) with
+  Python 3.8 or newer
 - Your own dump of the European release (game code ASMP), as an `.nds` file
 - A 3DS or 2DS with custom firmware and FBI
 
 ## How to build
+
+### Windows
 
 1. Download `SM64DS-Enhanced-Builder.zip` from [Releases](../../releases).
    Right-click it, choose Extract All, and run `SM64DS-Enhanced-Builder.exe`
@@ -43,9 +46,7 @@ yourself from your own cartridge dump.
 4. Click Build. It takes a few seconds and saves the `.cia` next to your dump.
 5. Copy the `.cia` to your SD card and install it with FBI.
 
-The `.cia` has Nintendo's game data in it, so keep it to your own consoles.
-
-### On a Mac
+### macOS
 
 The Mac builder is the same builder as a Mac app, `SM64DS Enhanced Builder.app`,
 for macOS 11 or later on Apple silicon or Intel.
@@ -92,6 +93,22 @@ xattr -dr com.apple.quarantine "/Applications/SM64DS Enhanced Builder.app"
 If the app isn't in Applications, type `xattr -dr com.apple.quarantine ` (with
 the space) and drag the app onto the Terminal window for its path. Only do this
 for a copy from this project's releases, or one you made yourself.
+
+### Linux (or macOS in a terminal)
+
+1. Download `SM64DS-Enhanced-Builder-Linux-Mac.zip` from
+   [Releases](../../releases) and unzip it.
+2. In a terminal, in the folder it makes, run `python3 sm64ds_builder.py` and
+   drag your dump into the terminal when it asks. The `.cia` goes next to your
+   dump.
+3. Copy the `.cia` to your SD card and install it with FBI.
+
+To build for an Old 3DS, or to change what the game starts with, add
+settings: `python3 sm64ds_builder.py DUMP.nds --option console=old`
+(`--help` lists them). It makes the same `.cia` as the Windows builder, byte
+for byte.
+
+The `.cia` has Nintendo's game data in it, so keep it to your own consoles.
 
 ## Source
 

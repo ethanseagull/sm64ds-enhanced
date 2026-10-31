@@ -1,0 +1,76 @@
+# The Linux and Mac builder (SM64DS-Enhanced-Builder-Linux-Mac.zip) on real
+# Linux and Macs, before a release takes it: port3ds/builder/release.py puts
+# the zip on a draft release and starts this with its tag. Each machine
+# unpacks it as a player would and runs sm64ds_builder.py --self-test, which
+# checks every part of the build that needs no dump gives the same bytes as
+# on Windows, and that its makerom builds a .cia (both Mac ones on Apple
+# silicon, the Intel one under Rosetta).
+name: Builder (Linux and Mac)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: the (draft) release holding SM64DS-Enhanced-Builder-Linux-Mac.zip
+        required: true
+
+permissions:
+  contents: write   # a draft release's files are only there for the repository's writers
+
+jobs:
+  self-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: ubuntu-22.04
+            python: '3.8'   # the oldest it supports
+          - os: macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - if: ${{ matrix.python }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Download the zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern 'SM64DS-Enhanced-Builder-Linux-Mac.zip'
+
+      - name: Unpack it as a player would
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            ditto -x -k SM64DS-Enhanced-Builder-Linux-Mac.zip builder
+            # a browser's download is quarantined, and Archive Utility passes
+            # that on to what it unpacks: the builder has to cope with it
+            for f in builder/builder-files/makerom/*/makerom; do
+              xattr -w com.apple.quarantine "0081;$(date +%s);Safari;" "$f"
+            done
+            softwareupdate --install-rosetta --agree-to-license || true
+          else
+            unzip -q SM64DS-Enhanced-Builder-Linux-Mac.zip -d builder
+          fi
+          ls -l builder builder/builder-files/makerom/*
+
+      - name: Self-test
+        run: python3 builder/sm64ds_builder.py --self-test
+
+  # an older Linux than Actions' own (glibc 2.36), as a fresh install has it:
+  # its own Python and nothing else
+  self-test-debian:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the zip and unpack it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.tag }}" --repo "${{ github.repository }}" --pattern 'SM64DS-Enhanced-Builder-Linux-Mac.zip'
+          unzip -q SM64DS-Enhanced-Builder-Linux-Mac.zip -d builder
+
+      - name: Self-test on Debian 12
+        run: |
+          docker run --rm -v "$PWD/builder:/builder" debian:12 sh -euc '
+            apt-get update -qq && apt-get install -y -qq python3 > /dev/null
+            python3 /builder/sm64ds_builder.py --self-test'

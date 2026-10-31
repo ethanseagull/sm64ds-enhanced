@@ -1520,31 +1520,38 @@ namespace Sm64dsEnhanced
             return bmp;
         }
 
-        static Bitmap Scaled(Bitmap src, int factor)
-        {
-            var big = new Bitmap(src.Width * factor, src.Height * factor, PixelFormat.Format32bppArgb);
-            using (var g = Graphics.FromImage(big))
-            {
-                g.InterpolationMode = InterpolationMode.NearestNeighbor;
-                g.PixelOffsetMode = PixelOffsetMode.Half;
-                g.DrawImage(src, 0, 0, big.Width, big.Height);
-            }
-            return big;
-        }
-
-        // 48x48 (the SMDH's large icon), on white: an SMDH icon has no alpha
+        // 48x48 (the SMDH's large icon): the 32x32 icon at 44x44 in the middle, on
+        // white (an SMDH icon has no alpha), each pixel the area-weighted average
+        // of the DS pixels under it, in whole numbers, so sm64ds_builder.py makes
+        // the same picture to the bit (a DS pixel is 44 units wide, an icon pixel
+        // 32, so each icon pixel's weights add up to 32 x 32)
         public static void SaveIcon(Bitmap ds, string path)
         {
-            using (var big = Scaled(ds, 3))
             using (var icon = new Bitmap(48, 48, PixelFormat.Format32bppArgb))
             {
-                using (var g = Graphics.FromImage(icon))
-                {
-                    g.Clear(Color.White);
-                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                    g.DrawImage(big, 2, 2, 44, 44);
-                }
+                for (int y = 0; y < 48; y++)
+                    for (int x = 0; x < 48; x++)
+                    {
+                        int r = 255, g = 255, b = 255;
+                        if (x >= 2 && x < 46 && y >= 2 && y < 46)
+                        {
+                            int sr = 0, sg = 0, sb = 0;
+                            int x0 = (x - 2) * 32, y0 = (y - 2) * 32;
+                            for (int sy = y0 / 44; sy <= (y0 + 31) / 44; sy++)
+                                for (int sx = x0 / 44; sx <= (x0 + 31) / 44; sx++)
+                                {
+                                    int w = (Math.Min(x0 + 32, sx * 44 + 44) - Math.Max(x0, sx * 44)) *
+                                            (Math.Min(y0 + 32, sy * 44 + 44) - Math.Max(y0, sy * 44));
+                                    var c = ds.GetPixel(sx, sy);
+                                    bool clear = c.A == 0;
+                                    sr += w * (clear ? 255 : c.R);
+                                    sg += w * (clear ? 255 : c.G);
+                                    sb += w * (clear ? 255 : c.B);
+                                }
+                            r = (sr + 512) / 1024; g = (sg + 512) / 1024; b = (sb + 512) / 1024;
+                        }
+                        icon.SetPixel(x, y, Color.FromArgb(255, r, g, b));
+                    }
                 icon.Save(path, ImageFormat.Png);
             }
         }

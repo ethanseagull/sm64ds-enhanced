@@ -12,8 +12,13 @@ with Nintendo.
   (devkitPro, zlib, below) and SIMDe (MIT, below).
 - The builder's extractor (Extract.cs) is the PC port's extract_assets.ps1
   in C# (same project and licence).
-- makerom.exe 0.19.0, from Project_CTR: https://github.com/3DSGuy/Project_CTR
-  (MIT, below).
+- makerom 0.19.0 (makerom.exe on Windows, makerom/ for Linux and macOS),
+  from Project_CTR (MIT, below):
+  https://github.com/3DSGuy/Project_CTR/tree/e8f5f529c54ff9b22a2491a480ffa69206bf7b19
+  It includes mbedtls (Apache 2.0, below), libyaml (MIT, below) and CUE's
+  blz (GPL 3 or later, below; its source is makerom/deps/libblz at that
+  link). The Linux and macOS builds are made from that source by this
+  project's .github/workflows/makerom.yml.
 - bannertool.exe 1.2.3: https://github.com/carstene1ns/3ds-bannertool
   (MIT, below).
 - banner.wav (the HOME Menu sound) and music.mp3 (the builder's music, a

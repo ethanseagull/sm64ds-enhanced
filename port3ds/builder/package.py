@@ -19,6 +19,11 @@ builder-files folder (also left unzipped in build3ds-wide/SM64DS-Enhanced-Builde
   music.mp3, done.mp3  the window's music and the sound a finished build plays
                        (the three sounds only where port3ds/builder has them)
 
+It also makes build3ds-wide/SM64DS-Enhanced-Builder-Linux-Mac.zip: sm64ds_builder.py
+(the builder in Python) beside the same builder-files less the Windows programs
+and the window's sounds, plus makerom for Linux and macOS (MAKEROM_UNIX) and
+selftest.txt, what sm64ds_builder.py --self-test checks a computer against.
+
 The .exe carries none of it inside: one that unpacked programs out of itself
 into %TEMP% and ran them was flagged by antivirus scanners (10 of 71 on
 VirusTotal for 1.0.0's). The release's .exe is GitHub Actions' build of the
@@ -50,6 +55,40 @@ ROOT = HERE.parents[1]
 UP = ROOT / 'port-0.9.1'
 TOOLS = ROOT / 'build-banner' / 'tools'
 DKA = Path(r'C:\devkitPro\devkitARM\bin')
+
+# makerom 0.19.0 for Linux and macOS (in build-banner/tools/makerom-0.19.0/<these>/makerom),
+# by their sha256: built from Project_CTR's source by the makerom workflow
+# (public/makerom.yml) on 2026-10-31, for glibc 2.17 and macOS 11. Project_CTR's
+# own release builds need glibc 2.38 and macOS 15.
+MAKEROM_UNIX = {
+    'linux-x86_64': '13da617a182aee92d2aabdad7428167376c8beded052e8bfdf72e58e5ef7eab7',
+    'macos-arm64': '9ecc3f2216513026394384ae20c4205560d5d09c54185fd38b1e1a358941fc52',
+    'macos-x86_64': 'a5c21b2bd6c7bb8ad162e38ba63256c86951722d22b665303267cda97dc3f35e',
+}
+
+UNIX_README = """\
+Super Mario 64 DS Enhanced builder for Linux and macOS
+
+You need Python 3.8 or newer (python3 --version) and your own dump of the
+European Super Mario 64 DS cartridge (game code ASMP), as an .nds file.
+
+In a terminal, in this folder:
+
+    python3 sm64ds_builder.py
+
+and drag your dump into the terminal when it asks. The .cia goes next to
+the dump. Copy it to your SD card and install it with FBI.
+
+    python3 sm64ds_builder.py DUMP.nds --option console=old
+
+builds for an Old 3DS; python3 sm64ds_builder.py --help lists the settings.
+python3 sm64ds_builder.py --self-test checks this computer gives the same
+results as the Windows builder. On a computer builder-files has no makerom
+for (Linux on ARM, say), build makerom 0.19.0 yourself and add
+--makerom PATH.
+
+Keep the builder-files folder next to sm64ds_builder.py.
+"""
 
 # romdata.bin pieces upstream's committed source carries as source, not as
 # extracted bytes: port/hal/ptr_tables.cpp's kuppa_blob_020889b0 (a table
@@ -149,7 +188,7 @@ def main():
     third = (HERE / 'THIRD-PARTY.txt').read_text(encoding='utf-8')
     third += '\n\n==== bannertool: LICENSE.txt ====\n\n' + (bt / 'LICENSE.txt').read_text(encoding='utf-8')
     third += '\n\n==== sm64ds-decomp / port (Tango): LICENSE ====\n\n' + (UP / 'LICENSE').read_text(encoding='utf-8')
-    for name in ('makerom', 'libctru', 'citro3d', 'simde'):   # port3ds/builder/licenses
+    for name in ('makerom', 'mbedtls', 'libyaml', 'gpl-3.0', 'libctru', 'citro3d', 'simde'):   # port3ds/builder/licenses
         third += f'\n\n==== {name} ====\n\n' + (HERE / 'licenses' / f'{name}.txt').read_text(encoding='utf-8')
     (payload / 'THIRD-PARTY.txt').write_text(third, encoding='utf-8')
     (payload / 'LABEL.txt').write_text(a.label + '\n')
@@ -177,7 +216,40 @@ def main():
         for f in sorted(folder.rglob('*')):
             if f.is_file():
                 z.write(f, f.relative_to(folder).as_posix())
-    for f in (exe, out):
+
+    # Linux and macOS: sm64ds_builder.py beside the same builder-files, less
+    # the Windows programs and the window's sounds, plus makerom's builds for
+    # them and selftest.txt (what the self-test checks those computers against)
+    unix = a.build / 'SM64DS-Enhanced-Builder-Linux-Mac'
+    if unix.exists():
+        shutil.rmtree(unix)
+    ufiles = unix / 'builder-files'
+    ufiles.mkdir(parents=True)
+    for f in payload.iterdir():
+        if f.name not in ('makerom.exe', 'bannertool.exe', 'music.mp3', 'done.mp3'):
+            shutil.copy2(f, ufiles)
+    for plat, sha in MAKEROM_UNIX.items():
+        src = TOOLS / 'makerom-0.19.0' / plat / 'makerom'
+        assert hashlib.sha256(src.read_bytes()).hexdigest() == sha, f'{src} is not makerom 0.19.0\'s'
+        (ufiles / 'makerom' / plat).mkdir(parents=True)
+        shutil.copy2(src, ufiles / 'makerom' / plat / 'makerom')
+    shutil.copy2(HERE / 'sm64ds_builder.py', unix)
+    (unix / 'README.txt').write_text(UNIX_README, encoding='utf-8', newline='\n')
+    subprocess.run([sys.executable, '-I', str(unix / 'sm64ds_builder.py'), '--self-test-write'], check=True,
+                   stdout=subprocess.DEVNULL)
+    uout = out.with_name('SM64DS-Enhanced-Builder-Linux-Mac.zip')
+    with zipfile.ZipFile(uout, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for f in sorted(unix.rglob('*')):
+            if f.is_file():
+                # as a Unix zip, so unzip and the Mac's Archive Utility keep the
+                # programs runnable
+                info = zipfile.ZipInfo.from_file(f, f.relative_to(unix).as_posix())
+                info.create_system = 3
+                runnable = f.name in ('makerom', 'sm64ds_builder.py')
+                info.external_attr = ((0o100755 if runnable else 0o100644) << 16)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                z.writestr(info, f.read_bytes(), compresslevel=9)
+    for f in (exe, out, uout):
         print(f'{f}: {f.stat().st_size:,} bytes, sha256 {hashlib.sha256(f.read_bytes()).hexdigest()[:16]}')
 
 

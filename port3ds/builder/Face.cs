@@ -243,11 +243,39 @@ namespace Sm64dsEnhanced
 
         // --- matrices: 4x4, row-vector convention, row-major ----------------
 
-        static double[] Euler(double rx, double ry, double rz)
+        // sin of a DS angle (1/4096 turns), the same to the bit wherever it runs:
+        // Math.Sin and Python's differ in the last bit at 269 of the 4096 angles,
+        // so this folds the angle into the first eighth of a turn and sums the
+        // series in plain doubles, as sm64ds_builder.py's sin4096 does
+        static double Sin4096(int a)
         {
-            double a0 = Math.Sin(rx * Turn), a1 = Math.Cos(rx * Turn);
-            double b0 = Math.Sin(ry * Turn), b1 = Math.Cos(ry * Turn);
-            double c0 = Math.Sin(rz * Turn), c1 = Math.Cos(rz * Turn);
+            int q = ((a % 4096) + 4096) % 4096;
+            bool neg = q >= 2048;
+            if (neg) q -= 2048;
+            if (q > 1024) q = 2048 - q;
+            double v = q <= 512 ? SinSeries(q * (Math.PI / 2048)) : CosSeries((1024 - q) * (Math.PI / 2048));
+            return neg ? -v : v;
+        }
+
+        static double SinSeries(double x)
+        {
+            double x2 = x * x;
+            return x * (1 - x2 / 6 * (1 - x2 / 20 * (1 - x2 / 42 * (1 - x2 / 72 * (1 - x2 / 110 *
+                       (1 - x2 / 156 * (1 - x2 / 210 * (1 - x2 / 272))))))));
+        }
+
+        static double CosSeries(double x)
+        {
+            double x2 = x * x;
+            return 1 - x2 / 2 * (1 - x2 / 12 * (1 - x2 / 30 * (1 - x2 / 56 * (1 - x2 / 90 *
+                   (1 - x2 / 132 * (1 - x2 / 182 * (1 - x2 / 240)))))));
+        }
+
+        static double[] Euler(int rx, int ry, int rz)
+        {
+            double a0 = Sin4096(rx), a1 = Sin4096(rx + 1024);
+            double b0 = Sin4096(ry), b1 = Sin4096(ry + 1024);
+            double c0 = Sin4096(rz), c1 = Sin4096(rz + 1024);
             return new[] { b1 * c1, b1 * c0, -b0,
                            b0 * a0 * c1 - a1 * c0, a1 * c1 + b0 * a0 * c0, b1 * a0,
                            a0 * c0 + b0 * a1 * c1, b0 * a1 * c0 - a0 * c1, b1 * a1 };
