@@ -1,0 +1,25 @@
+Super Mario 64 DS Enhanced builder for macOS: what's in it
+
+None of Super Mario 64 DS is in this app. Everything of the game in the .cia
+it makes comes from the dump you give it, on your Mac, so the .cia is for your
+own consoles. Please don't share it.
+
+Super Mario 64 DS is (c) Nintendo. This is a fan project and isn't affiliated
+with Nintendo.
+
+- MacOS/SM64DSEnhancedBuilder: the builder, a Swift port of the Windows
+  builder and of the PC port's extractor, extract_assets.ps1 (tangosdev's
+  Super Mario 64 DS decompilation and PC port, MIT, below).
+- Resources/payload/game3ds.elf: the 3DS port, built on tangosdev's Super
+  Mario 64 DS decompilation and PC port (MIT, below). It includes libctru and
+  citro3d (devkitPro, zlib, below) and SIMDe (MIT, below).
+- Helpers/makerom 0.19.0, from Project_CTR (MIT, below), built for macOS from
+  https://github.com/3DSGuy/Project_CTR/tree/e8f5f529c54ff9b22a2491a480ffa69206bf7b19
+  It includes mbedtls (Apache 2.0, below), libyaml (MIT, below) and CUE's blz
+  (GPL 3 or later, below; its source is makerom/deps/libblz at that link).
+- Helpers/bannertool 1.2.3 (MIT, below), built for macOS from
+  https://github.com/carstene1ns/3ds-bannertool/tree/da573b13418acd0ac1803b43b30e8a155e5f83e2
+  It includes stb_image and stb_vorbis (Sean Barrett) and dr_wav (David
+  Reid), which are public domain.
+- banner.wav (the HOME Menu sound) and music.mp3 (the builder's music, a
+  lullaby remake): made by ethan.

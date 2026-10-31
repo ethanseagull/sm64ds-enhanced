@@ -26,7 +26,7 @@ yourself from your own cartridge dump.
 
 ## You'll need
 
-- Windows 10 or 11
+- Windows 10 or 11, or a Mac with macOS 11 or later
 - Your own dump of the European release (game code ASMP), as an `.nds` file
 - A 3DS or 2DS with custom firmware and FBI
 
@@ -45,6 +45,23 @@ yourself from your own cartridge dump.
 
 The `.cia` has Nintendo's game data in it, so keep it to your own consoles.
 
+### On a Mac
+
+The Mac builder is the same builder as a Mac app, `SM64DS Enhanced Builder.app`.
+
+1. Make it with `python3 port3ds/builder/mac/package.py`, which takes about a
+   minute (see [port3ds/builder/mac](port3ds/builder/mac/README.md)), or
+   download the Mac zip if the release has one and double-click it.
+2. Open the app. If you downloaded it, macOS won't open it the first time,
+   because it isn't notarized. On macOS 15 or later, go to System Settings >
+   Privacy & Security and click Open Anyway. On older versions, Control-click
+   the app and choose Open. One you made yourself opens straight away.
+3. Pick your dump, drag it onto the window, or drop it on the app's Dock icon.
+   If your dump is on your Desktop or in Documents or Downloads, macOS asks
+   whether the builder can use that folder; allow it, so that it can save the
+   `.cia` there.
+4. Choose your settings and click Build (⌘B), as on Windows.
+
 ## Source
 
 Everything in the release is built from this repository:
@@ -54,6 +71,7 @@ Everything in the release is built from this repository:
   `upstream-patches/`, the changes to the decompilation's PC port.
 - `port3ds/builder/` is the builder. Its `.exe` is built by
   [GitHub Actions](.github/workflows/builder.yml) from this source.
+  `port3ds/builder/mac/` is the same builder for macOS, in Swift.
 - [docs/BUILDING.md](docs/BUILDING.md) says how to build the game yourself.
 
 The code here is under the [MIT licence](LICENSE). The decompilation and PC
