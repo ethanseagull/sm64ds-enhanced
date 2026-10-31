@@ -60,7 +60,8 @@ KIT = 'builder-files'
 # what the Mac app has been checked against, byte for byte, with the Windows
 # builder's C# run under Mono (extraction, RomFS, 3D banner, options.txt)
 TESTED = {
-    'd5daea4194606ce754859263a89022dd254c231ec29e34948138339ace25fe48': f'v1.0.0, {ZIP_NAME} (31 Oct 2026)',
+    'd565831d267a6d0361d34aee0e176817f2226d3a4b23b26bf0deb6725874936a': f'v1.0.0, {ZIP_NAME} (31 Oct 2026, 18:40)',
+    'd5daea4194606ce754859263a89022dd254c231ec29e34948138339ace25fe48': f'v1.0.0, {ZIP_NAME} (31 Oct 2026, 18:08)',
     '90b37d248702aa2b1b75fe5b71e408bf08200c86ea4b9d0302a454058a200f2e': f'v1.0.0, {EXE_NAME} (29 Oct 2026)',
 }
 
