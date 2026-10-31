@@ -1,6 +1,9 @@
 # The Mac builder (port3ds/builder/mac), built on GitHub's macOS runners from
 # this repository's source and the release's builder files, and attached to the
-# release as SM64DS-Enhanced-Builder-<version>-mac.zip.
+# release as SM64DS-Enhanced-Builder-<version>-mac.zip. Its makerom is the
+# release's Linux/Mac zip's (the same macOS 11 builds, joined into one), and
+# before it's attached the app's --self-test must give that zip's selftest.txt
+# (the Windows builder's results), on Apple silicon and under Rosetta.
 #
 # It runs when a release is published, if the release has
 # SM64DS-Enhanced-Builder.zip. Run it by hand (Actions > Mac builder > Run
@@ -68,6 +71,11 @@ jobs:
           for try in 1 2 3 4 5 6; do
             if gh release download "$TAG" --repo "$SOURCE" --pattern SM64DS-Enhanced-Builder.zip --dir dl; then
               echo "found=true" >> "$GITHUB_OUTPUT"
+              if gh release download "$TAG" --repo "$SOURCE" --pattern SM64DS-Enhanced-Builder-Linux-Mac.zip --dir dl; then
+                unzip -q dl/SM64DS-Enhanced-Builder-Linux-Mac.zip -d unix
+                lipo -create unix/builder-files/makerom/macos-arm64/makerom unix/builder-files/makerom/macos-x86_64/makerom -output dl/makerom
+                echo "MAKEROM=--makerom dl/makerom" >> "$GITHUB_ENV"
+              fi
               exit 0
             fi
             [ "$GITHUB_EVENT_NAME" = release ] || break
@@ -83,7 +91,24 @@ jobs:
 
       - name: Build the Mac app
         if: steps.zip.outputs.found == 'true'
-        run: python -I port3ds/builder/mac/package.py --from dl/SM64DS-Enhanced-Builder.zip
+        run: python -I port3ds/builder/mac/package.py --from dl/SM64DS-Enhanced-Builder.zip $MAKEROM
+
+      - name: Self-test
+        if: steps.zip.outputs.found == 'true'
+        run: |
+          set -eu
+          app=$(ls -d port3ds/builder/mac/build/*.app)
+          exe="$app/Contents/MacOS/SM64DSEnhancedBuilder"
+          softwareupdate --install-rosetta --agree-to-license > /dev/null 2>&1 || true
+          for arch in arm64 x86_64; do
+            arch -$arch "$exe" --self-test | tee got.txt
+            [ "$(wc -l < got.txt)" -eq 2 ]
+            if [ -f unix/builder-files/selftest.txt ]; then
+              while read -r line; do
+                grep -qxF "$line" unix/builder-files/selftest.txt || { echo "::error::$arch: $line is not the Windows builder's"; exit 1; }
+              done < got.txt
+            fi
+          done
 
       - name: Keep the zip
         if: steps.zip.outputs.found == 'true'

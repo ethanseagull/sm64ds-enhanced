@@ -211,17 +211,46 @@ enum Face {
 
     // --- matrices: 4x4, row-vector convention, row-major ----------------
 
-    static func euler(_ rx: Double, _ ry: Double, _ rz: Double) -> [Double] {
-        let a0 = sin(rx * turn), a1 = cos(rx * turn)
-        let b0 = sin(ry * turn), b1 = cos(ry * turn)
-        let c0 = sin(rz * turn), c1 = cos(rz * turn)
+    // sin of a DS angle (1/4096 turns), the same to the bit wherever it runs:
+    // the system's sin differs in the last bit at some angles, so this folds
+    // the angle into the first eighth of a turn and sums the series in plain
+    // doubles, as Face.cs's Sin4096 and sm64ds_builder.py's sin4096 do
+    static func sin4096(_ a: Int) -> Double {
+        var q = ((a % 4096) + 4096) % 4096
+        let neg = q >= 2048
+        if neg { q -= 2048 }
+        if q > 1024 { q = 2048 - q }
+        let v = q <= 512 ? sinSeries(Double(q) * (Double.pi / 2048)) : cosSeries(Double(1024 - q) * (Double.pi / 2048))
+        return neg ? -v : v
+    }
+
+    // x(1 - x²/6(1 - x²/20(1 - ...))), innermost first: the same operations, in
+    // the same order, as Face.cs's nested expression
+    static func sinSeries(_ x: Double) -> Double {
+        let x2 = x * x
+        var s = 1.0
+        for d in [272.0, 210, 156, 110, 72, 42, 20, 6] { s = 1 - x2 / d * s }
+        return x * s
+    }
+
+    static func cosSeries(_ x: Double) -> Double {
+        let x2 = x * x
+        var s = 1.0
+        for d in [240.0, 182, 132, 90, 56, 30, 12, 2] { s = 1 - x2 / d * s }
+        return s
+    }
+
+    static func euler(_ rx: Int, _ ry: Int, _ rz: Int) -> [Double] {
+        let a0 = sin4096(rx), a1 = sin4096(rx + 1024)
+        let b0 = sin4096(ry), b1 = sin4096(ry + 1024)
+        let c0 = sin4096(rz), c1 = sin4096(rz + 1024)
         return [b1 * c1, b1 * c0, -b0,
                 b0 * a0 * c1 - a1 * c0, a1 * c1 + b0 * a0 * c0, b1 * a0,
                 a0 * c0 + b0 * a1 * c1, b0 * a1 * c0 - a0 * c1, b1 * a1]
     }
 
     static func local(_ scale: [Double], _ rot: [Int], _ trans: [Double]) -> [Double] {
-        let r = euler(Double(rot[0]), Double(rot[1]), Double(rot[2]))
+        let r = euler(rot[0], rot[1], rot[2])
         var m = [Double](repeating: 0, count: 16)
         for i in 0..<3 {
             for j in 0..<3 { m[i * 4 + j] = scale[i] * r[i * 3 + j] }

@@ -424,7 +424,8 @@ def info_plist(label, bundle_id):
 
 
 def third_party(payload_text):
-    """The Mac header, then the payload's licences, then the ones makerom brings on a Mac."""
+    """The Mac header, then the payload's licences, then the ones makerom brings
+    (unless the payload has them: releases since 1.1.0 do)."""
     cut = payload_text.find('==== bannertool')
     if cut < 0:
         sys.exit('the payload\'s THIRD-PARTY.txt has no bannertool section')
@@ -432,7 +433,8 @@ def third_party(payload_text):
     text += payload_text[cut:].replace('\r\n', '\n').rstrip() + '\n'
     for name, title in (('mbedtls', 'mbedtls (in makerom)'), ('libyaml', 'libyaml (in makerom)'),
                         ('gpl-3.0', 'GNU General Public License 3 (CUE\'s blz, in makerom)')):
-        text += f'\n\n==== {title} ====\n\n' + (HERE / 'licenses' / f'{name}.txt').read_text(encoding='utf-8').rstrip() + '\n'
+        if f'\n==== {name} ====\n' not in text:
+            text += f'\n\n==== {title} ====\n\n' + (HERE / 'licenses' / f'{name}.txt').read_text(encoding='utf-8').rstrip() + '\n'
     return text
 
 

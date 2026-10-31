@@ -84,8 +84,13 @@ With the European dump, against the Windows builder's own C# run under Mono:
   `romdata.bin`), `files.pak`, the 3D banner (with and without the title
   logo), `options.txt` and the DS icon and logo pixels are byte-for-byte the
   same.
-- the HOME Menu icon's PNG is drawn with Core Graphics, not GDI+, so its
-  scaling differs by a little.
+- the HOME Menu icon is scaled the Windows builder's way, an area-weighted
+  average in whole numbers, and the banner's bone angles use its sine table,
+  so neither depends on the system's maths library.
+
+`--self-test` (below) checks the last two without a dump, against the Windows
+builder's results, and the Mac builder workflow runs it on Apple silicon and
+under Rosetta before it attaches the app to a release.
 
 The makerom built here makes the same `.cia` content as the official 0.19.0
 build. Only the ticket's title key and ID and the content ID differ, and they
@@ -106,3 +111,10 @@ arguments. It uses the default settings, not the window's saved ones.
 `fps_counter`, `analog_controls`) and `console=new|old`. Put `console` first,
 because it sets that console's defaults. `--keep` leaves the work folder in
 place.
+
+    "SM64DS Enhanced Builder.app/Contents/MacOS/SM64DSEnhancedBuilder" --self-test
+
+prints the SHA-256 of the banner's sine table and of a HOME Menu icon made
+from a fixed test picture, as `sin4096` and `smdh` lines. They must match
+those lines of `builder-files/selftest.txt` in the release's Linux/Mac zip
+(`sm64ds_builder.py --self-test`'s), which are the Windows builder's.

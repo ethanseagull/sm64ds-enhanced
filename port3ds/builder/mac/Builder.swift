@@ -43,9 +43,11 @@ enum Program {
     // which sets that console's 60 fps and anti-aliasing defaults, so it goes
     // first) changes one. --snapshot DIR and --icon DIR draw the windows and
     // the app icon to PNGs (package.py, and checking the look) instead.
+    // --self-test prints what SelfTest makes.
     static func main() {
         let args = Array(CommandLine.arguments.dropFirst())
         if args.contains(where: { $0.hasPrefix("--") }) {
+            if args.contains("--self-test") { exit(SelfTest.run()) }
             if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count { exit(Snapshot.windows(args[i + 1], args)) }
             if let i = args.firstIndex(of: "--icon"), i + 1 < args.count { exit(Snapshot.icon(args[i + 1])) }
             exit(headless(args))
@@ -1276,6 +1278,46 @@ enum Payload {
     }
 }
 
+// The parts of a build that need no dump, from the same fixed inputs as
+// sm64ds_builder.py --self-test (its sin4096 and smdh pieces), each printed as
+// "name sha256": the Linux/Mac builder's builder-files/selftest.txt has the
+// Windows builder's, which every computer must match, or its .cia would
+// differ. The icon goes through saveIcon and the app's own bannertool, as a
+// build's does.
+enum SelfTest {
+    static func run() -> Int32 {
+        var sines: [UInt8] = []
+        for a in -4096..<4096 {
+            let bits = Face.sin4096(a).bitPattern
+            for k in 0..<8 { sines.append(UInt8(truncatingIfNeeded: bits >> UInt64(8 * k))) }
+        }
+        print("sin4096 " + Face.sha(sines))
+        var ds = Pixels(32, 32)
+        for y in 0..<32 {
+            for x in 0..<32 {
+                if (x * 7 + y * 3) % 11 == 0 { ds.set(x, y, 0, 0, 0, 0) }
+                else { ds.set(x, y, (x * 8) & 0xf8, (y * 8) & 0xf8, ((x ^ y) * 8) & 0xf8, 255) }
+            }
+        }
+        let dir = NSTemporaryDirectory() + "sm64ds-self-test-" + UUID().uuidString
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        do {
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            try Art.saveIcon(ds, dir + "/icon.png")
+            var lines: [String] = []
+            let rc = try Proc.run(try Payload.helper("bannertool"),
+                                  ["makesmdh", "-s", Program.title, "-l", Program.title, "-p", Program.author,
+                                   "-i", dir + "/icon.png", "-o", dir + "/icon.smdh"]) { lines.append($0) }
+            if rc != 0 { throw BuildError("bannertool exit code \(rc): " + lines.joined(separator: " ")) }
+            print("smdh " + Face.sha(try Bytes.read(dir + "/icon.smdh")))
+        } catch {
+            print("self-test: \(error)")
+            return 1
+        }
+        return 0
+    }
+}
+
 final class Build {
     let rom: String, output: String, tmp: String
     let log: (String) -> Void
@@ -1685,17 +1727,36 @@ enum Art {
         return bmp
     }
 
-    // 48x48 (the SMDH's large icon), on white: an SMDH icon has no alpha
+    // 48x48 (the SMDH's large icon), on white: an SMDH icon has no alpha. The
+    // DS icon is 44x44 in the middle, each pixel the area-weighted average of
+    // the DS pixels under it (transparent ones white), in whole numbers, as
+    // Builder.cs's SaveIcon does
     static func saveIcon(_ ds: Pixels, _ path: String) throws {
-        guard let big = ds.scaled(3).cgImage(), let g = Pixels.canvas(48, 48) else {
-            throw BuildError("Could not draw the HOME Menu icon.")
+        var icon = Pixels(48, 48)
+        for y in 0..<48 {
+            for x in 0..<48 {
+                var r = 255, g = 255, b = 255
+                if x >= 2 && x < 46 && y >= 2 && y < 46 {
+                    var sr = 0, sg = 0, sb = 0
+                    let x0 = (x - 2) * 32, y0 = (y - 2) * 32
+                    for sy in (y0 / 44)...((y0 + 31) / 44) {
+                        for sx in (x0 / 44)...((x0 + 31) / 44) {
+                            let w = (min(x0 + 32, sx * 44 + 44) - max(x0, sx * 44)) *
+                                    (min(y0 + 32, sy * 44 + 44) - max(y0, sy * 44))
+                            let at = (sy * ds.width + sx) * 4
+                            let clear = ds.rgba[at + 3] == 0
+                            sr += w * (clear ? 255 : Int(ds.rgba[at]))
+                            sg += w * (clear ? 255 : Int(ds.rgba[at + 1]))
+                            sb += w * (clear ? 255 : Int(ds.rgba[at + 2]))
+                        }
+                    }
+                    r = (sr + 512) / 1024; g = (sg + 512) / 1024; b = (sb + 512) / 1024
+                }
+                icon.set(x, y, r, g, b, 255)
+            }
         }
-        g.setFillColor(Look.rgb(255, 255, 255))
-        g.fill(CGRect(x: 0, y: 0, width: 48, height: 48))
-        g.interpolationQuality = .high
-        g.draw(big, in: CGRect(x: 2, y: 2, width: 44, height: 44))
-        guard let icon = g.makeImage() else { throw BuildError("Could not draw the HOME Menu icon.") }
-        try Pixels.png(icon, path)
+        guard let image = icon.cgImage() else { throw BuildError("Could not draw the HOME Menu icon.") }
+        try Pixels.png(image, path)
     }
 
     // The title screen's logo, from overlay 7 of the dump: title_demo_main.ncg
