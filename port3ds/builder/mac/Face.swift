@@ -224,7 +224,7 @@ enum Face {
         return neg ? -v : v
     }
 
-    // x(1 - x²/6(1 - x²/20(1 - ...))), innermost first: the same operations, in
+    // x (1 - x^2/6 (1 - x^2/20 (1 - ...))), innermost first: the same operations, in
     // the same order, as Face.cs's nested expression
     static func sinSeries(_ x: Double) -> Double {
         let x2 = x * x
