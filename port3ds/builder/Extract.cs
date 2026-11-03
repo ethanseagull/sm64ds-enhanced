@@ -412,7 +412,7 @@ namespace Sm64dsEnhanced
 
         // The overlays' and the program's back-to-front LZ ("BLZ"): both streams
         // run backwards from the end; anything before the compressed run is plain.
-        static byte[] ExpandBlz(byte[] data)
+        internal static byte[] ExpandBlz(byte[] data)
         {
             try
             {

@@ -8,13 +8,23 @@ The source of `SM64DS-Enhanced-Builder.exe` from the release:
   of your dump and checks them against the hashes the build expects.
 - `Settings.cs`: the build settings (the console and the game's options),
   written into the `.cia` as the game's `options.txt`.
+- `Languages.cs`: the game's language (`--language`), and the Japanese and
+  American English editions, built from a European and a Japanese or American
+  dump: that cartridge's text, fonts and graphics over the European game's.
+- `Korean.cs`: the Korean edition, the same from a Korean dump.
+- `Regions.cs`: the American and Japanese cartridges alone, without a European
+  dump: the European game's data made out of that cartridge's, by the
+  `region-ASME.tsv` and `region-ASMJ.tsv` in `builder-files` (offsets, the
+  European game's own numbers and file names, and hashes; none of the game).
+- `region_kit.py`: makes those two from the three cartridges, for each build
+  of the game (it is not part of the builder a player runs).
 - `Face.cs`: the 3D HOME Menu banner. `face/face.template` is the banner model
   with every value from the game zeroed out, and `face/face.recipe` says where
   each value goes; the builder fills them in from your dump.
 - `sm64ds_builder.py`: the builder for Linux and macOS (it runs on Windows
-  too), the four files above in Python. It makes the same `.cia`, byte for
+  too), the seven files above in Python. It makes the same `.cia`, byte for
   byte; `--self-test` checks a computer gives the same results.
-- `build_exe.py`: compiles the `.exe` from those four files with the C#
+- `build_exe.py`: compiles the `.exe` from those seven files with the C#
   compiler that comes with Windows. The release's `.exe` is built this way by
   [GitHub Actions](../../.github/workflows/builder.yml).
 - `package.py`: makes the zip, the `.exe` plus its `builder-files` folder: the

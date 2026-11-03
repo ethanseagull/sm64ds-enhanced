@@ -130,6 +130,7 @@ static void init_done(void) {}
 // because a ROM-clean build has no PORT_REPO_ROOT fallback.
 // port_romdata_load is only linked in a ROM-clean build (tools/pcprobe.sh).
 extern "C" void port_romdata_load(void) __attribute__((weak));
+extern "C" void game3ds_romdata_layout(void);   // language.cpp
 
 static void mount_romfs_data(void)
 {
@@ -190,6 +191,7 @@ __attribute__((constructor(101))) static void game3ds_early_io(void)
     // loading.
     if (port_romdata_load) {
         game3ds_early_mark("romdata: loading");
+        game3ds_romdata_layout();
         port_romdata_load();
         game3ds_early_mark("romdata: loaded");
     }

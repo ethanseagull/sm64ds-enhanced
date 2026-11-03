@@ -265,6 +265,31 @@ static void autotap(int frame)
         p += n;
         if (*p == ',') ++p;
     }
+    // GAME3DS_SHOT=frame:name[,frame:name...]: both screens at those frames, to
+    // sdmc:/sm64ds3ds/shot_<name>_top.bmp and _bottom.bmp (a test's pictures);
+    // the frames count again in each loop (the title's, a level's), whose
+    // pictures are shot_<name>_<loop>_... after the first
+    static const char *shots = getenv("GAME3DS_SHOT");
+    static int loop = 0, last = -1;
+    if (frame < last) ++loop;
+    last = frame;
+    for (const char *p = shots; p && *p;) {
+        int f = 0, n = 0;
+        char name[32] = "";
+        if (sscanf(p, "%d:%31[^,]%n", &f, name, &n) != 2) break;
+        if (f == frame) {
+            char tag[48], path[96];
+            if (loop) snprintf(tag, sizeof tag, "%s_%d", name, loop);
+            else snprintf(tag, sizeof tag, "%s", name);
+            snprintf(path, sizeof path, "sdmc:/sm64ds3ds/shot_%s_top.bmp", tag);
+            card3ds_screenshot(path);
+            snprintf(path, sizeof path, "sdmc:/sm64ds3ds/shot_%s_bottom.bmp", tag);
+            card3ds_screenshot(path, true);
+            printf("[shot] f%d %s\n", frame, tag);
+        }
+        p += n;
+        if (*p == ',') ++p;
+    }
 }
 
 
@@ -1747,6 +1772,7 @@ static int boot_stage2(void)
 // replaces all of them (the regression runner always writes one).
 void game3ds_lz_selftest();   // game/files_pack.cpp
 extern "C" void game3ds_options_load(void);   // game/options3ds.cpp
+extern "C" void game3ds_language_init(void);   // game/language.cpp
 static void load_env_file(void)
 {
     FILE *f = fopen("sdmc:/sm64ds3ds/env.txt", "r");
@@ -1825,6 +1851,7 @@ int sm64ds_smoke_main(void)
                getenv("SM64DS_HOST_ARENA_MB"), getenv("GAME3DS_SUB_PLANE_MAX_PX"));
     }
     game3ds_options_load();   // the options menu's choices over env.txt's
+    game3ds_language_init();  // the .cia's language (game/language.cpp, game/korean.cpp)
     game3ds_lz_selftest();   // GAME3DS_LZ_SELFTEST=1 only (game/files_pack.cpp)
     // Save and quit goes back to the title in this process (hal/level_change.cpp
     // handles it like the Game Over crossing). GAME3DS_QUIT_RELAUNCH=1 relaunches

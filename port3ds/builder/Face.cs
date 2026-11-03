@@ -365,7 +365,7 @@ namespace Sm64dsEnhanced
         }
 
         // the game's LZ77 files: "LZ77" and a type-0x10 stream, or plain
-        static byte[] Lz77(byte[] raw)
+        internal static byte[] Lz77(byte[] raw)
         {
             int i = raw.Length >= 4 && raw[0] == 'L' && raw[1] == 'Z' && raw[2] == '7' && raw[3] == '7' ? 4 : 0;
             if (raw[i] != 0x10) return raw;

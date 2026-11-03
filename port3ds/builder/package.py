@@ -54,7 +54,9 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 UP = ROOT / 'port-0.9.1'
 TOOLS = ROOT / 'build-banner' / 'tools'
-DKA = Path(r'C:\devkitPro\devkitARM\bin')
+# devkitARM: the devkitPro installer's, or devkitPro's packages in MSYS2
+DKA = next((p for p in (Path(r'C:\devkitPro\devkitARM\bin'), Path(r'C:\msys64\opt\devkitpro\devkitARM\bin'))
+            if p.is_dir()), Path(r'C:\devkitPro\devkitARM\bin'))
 
 # makerom 0.19.0 for Linux and macOS (in build-banner/tools/makerom-0.19.0/<these>/makerom),
 # by their sha256: built from Project_CTR's source by the makerom workflow
@@ -82,6 +84,17 @@ the dump. Copy it to your SD card and install it with FBI.
     python3 sm64ds_builder.py DUMP.nds --option console=old
 
 builds for an Old 3DS; python3 sm64ds_builder.py --help lists the settings.
+
+    python3 sm64ds_builder.py DUMP.nds --language fr
+
+builds the game in French (en, fr, de, it or es; English if not given).
+
+    python3 sm64ds_builder.py EUROPEAN.nds OTHER.nds
+
+builds the Japanese, Korean or American English edition, from your
+European dump and your dump of that cartridge (game code ASMJ, ASMK or
+ASME).
+
 python3 sm64ds_builder.py --self-test checks this computer gives the same
 results as the Windows builder. On a computer builder-files has no makerom
 for (Linux on ARM, say), build makerom 0.19.0 yourself and add
@@ -174,6 +187,13 @@ def main():
                     str(payload / 'game3ds.elf'), str(elf)], check=True)
     shutil.copy2(man, payload)
     shutil.copy2(rec, payload)
+    # the American and Japanese cartridges alone (region_kit.py, the same build's)
+    for code in ('ASME', 'ASMJ'):
+        kit = assets / f'region-{code}.tsv'
+        assert kit.is_file(), f'no {kit}: run region_kit.py with the three dumps'
+        line = re.search(r'^layout\t([0-9a-f]{64})\t(\d+)$', kit.read_text(encoding='utf-8'), re.M)
+        assert line and line.groups() == m.groups(), f'{kit.name} is another build\'s (run region_kit.py again)'
+        shutil.copy2(kit, payload)
     # the card build's RSF, but with the code left uncompressed: makerom's code
     # compression was 26 s of a 67 s build, for 3 MB less .cia
     rsf = (ROOT / 'port3ds' / 'cia' / 'game3ds.rsf').read_text()

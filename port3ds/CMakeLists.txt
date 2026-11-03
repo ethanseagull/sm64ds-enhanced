@@ -511,7 +511,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/game/manifest.cmake")
     sm64ds_smoke(game3ds TEST game/main_game.cpp GPU SOURCES
         src/card3ds.cpp src/interp3ds.cpp game/early_io.cpp game/files_pack.cpp game/card_fast.cpp game/host_stubs.cpp game/emit_inline.cpp
         game/virtual_thunks.cpp game/input3ds.cpp game/options3ds.cpp game/out_3ds.cpp game/phase_timers.cpp game/watchdog3ds.cpp
-        game/save_replace.cpp game/save_async.cpp game/sub_async.cpp game/lid3ds.cpp ${GAME_SOURCES})
+        game/save_replace.cpp game/save_async.cpp game/sub_async.cpp game/lid3ds.cpp game/language.cpp game/korean.cpp ${GAME_SOURCES})
     target_link_options(game3ds PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/game/game_aliases.ld")
     # game/ld/3dsx.ld (writable .rodata: the HAL writes GCC's vtables) shadows
     # devkitARM's; 3dsx.specs looks the script up with %s, which searches -B first.
@@ -527,6 +527,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/game/manifest.cmake")
             _ZN3ntr15ppu_scanout_subERNS_14SubFramebufferE _ZN3OAM4LoadEv
             _ZN3ntr22gx_card_settle_becauseEPKc hal_menu_present
             _ZN3ntr15ppu_compose_subERKNS_14SubFramebufferEPmiiiiii port_engine_a_fade)
+        target_link_options(game3ds PRIVATE "-Wl,--wrap=${sym}")
+    endforeach()
+    # game/language.cpp: the language the game runs as (GetOwnerLanguage,
+    # func_02059eb0); game/korean.cpp: the Korean edition's text (the Korean
+    # cartridge's message code)
+    foreach(sym _ZN7Message7AddCharEc func_0201b6f8 func_0201b7cc func_0201b100 func_0201ab6c
+            func_0201aca4 func_0201adac func_0201cd08 func_0201cfb8 func_0201d850
+            _ZN7Message11DisplayTextEt _ZN7Message30DisplayCourseNameForStarSelectEj func_0201f138
+            SetBg3Offset ObjectMessageIDToActualMessageID GetOwnerLanguage func_ov002_020f2990
+            func_02059eb0 func_ov007_020b63e4 func_ov007_020aec94)
         target_link_options(game3ds PRIVATE "-Wl,--wrap=${sym}")
     endforeach()
     # game/main_game.cpp: the core 2 present must be idle when gx.cpp frees

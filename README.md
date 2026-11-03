@@ -28,7 +28,11 @@ yourself from your own cartridge dump.
 
 - Windows 10 or 11, a Mac with macOS 11 or later, or Linux (x86-64) with
   Python 3.8 or newer
-- Your own dump of the European release (game code ASMP), as an `.nds` file
+- Your own dump of the European release (game code ASMP), as an `.nds` file;
+  or, for the [American English or Japanese edition](#languages), your dump
+  of the American (ASME, Rev 1) or Japanese (ASMJ, Rev 1) release alone
+- For the [Korean edition](#languages), your own dump of the Korean release
+  (ASMK) as well as the European one
 - A 3DS or 2DS with custom firmware and FBI
 
 ## How to build
@@ -109,6 +113,71 @@ settings: `python3 sm64ds_builder.py DUMP.nds --option console=old`
 for byte.
 
 The `.cia` has Nintendo's game data in it, so keep it to your own consoles.
+
+## Languages
+
+The European cartridge has the game in English, French, German, Italian and
+Spanish. The 3DS has no DS language setting for it to follow, so the `.cia` is
+in English unless you pick another language with the Python builder (on
+Windows too, with Python 3.8 or newer):
+
+```sh
+python3 sm64ds_builder.py DUMP.nds --language fr     # en, fr, de, it or es
+```
+
+The builder also makes the Japanese, Korean and American English editions,
+each from a second dump: the Japanese (ASMJ), Korean (ASMK) or American (ASME)
+cartridge. The port runs the European game's code, so an edition is built from
+both dumps: the European one for the game, and the other for its text, its
+fonts and the pictures with words in them.
+
+- **Windows:** choose (or drag in) the European dump, then the Japanese,
+  Korean or American one (choose the Korean one first and the builder asks for
+  the European one). It saves `Super Mario 64 DS Enhanced (Japanese).cia` (or
+  `(Korean)`, `(American English)`).
+- **Linux or macOS:** `python3 sm64ds_builder.py EUROPEAN.nds OTHER.nds` (in
+  either order; the settings work as above). The Mac app makes the European
+  edition only, so on a Mac use `sm64ds_builder.py` for these.
+
+| Edition | Second dump | What comes from it |
+| --- | --- | --- |
+| Japanese | Japanese cartridge, Rev 1 (ASMJ) | the dialogue, course and star names, menus, pause and save screens, the title menu and logo, the mini-games' pictures |
+| Korean | Korean cartridge (ASMK) | the same, with its Hangul font; like that cartridge, no Rec Room (its button is gone from the title menu) |
+| American English | American cartridge, Rev 1 (ASME) | the American text (its wording differs a little from the European English) and pictures |
+
+Each edition keeps the European game's layout where the other cartridge's
+code places things a little differently. Every language installs as the same
+title as the European edition (one replaces the other), and its saves are the
+European edition's, on the SD card.
+
+### The American or Japanese cartridge alone
+
+Without a European dump, the builder makes the American English edition from
+the American cartridge (ASME, Rev 1) alone, and the Japanese edition from the
+Japanese one (ASMJ, Rev 1) alone: choose (or drag in) that dump on Windows,
+or `python3 sm64ds_builder.py USA.nds` elsewhere. The game the port runs is
+still the European one, so the builder makes its data out of that cartridge:
+`builder-files/region-ASME.tsv` and `region-ASMJ.tsv` say where in it each
+piece is (no text, pictures or sound of either game: offsets, hashes, and the
+European program's own pointers, file numbers and names, and a few small
+tables of screen positions and sprite shapes the other cartridge has no
+counterpart for). With a European dump chosen first, the Windows builder makes
+the two-dump edition above instead.
+`port3ds/builder/region_kit.py` makes them from the three cartridges, for each
+build of the game.
+
+Made this way, the Japanese edition's title screen is the Japanese
+cartridge's own (its logo and タッチしてスタート!). The mini-games' messages
+(GAME OVER, YOU WIN and the like) are pictures only the European cartridge
+has, so they don't show; the games themselves play as usual.
+
+한국어판은 유럽판 덤프(ASMP)와 한국판 덤프(ASMK)가 둘 다 필요합니다. Windows
+빌더에서 한국판 덤프를 고르면 유럽판 덤프를 이어서 묻고, `Super Mario 64 DS
+Enhanced (Korean).cia`를 만듭니다. 대사, 코스·별 이름, 메뉴, 일시정지·저장
+화면, 타이틀이 모두 한국판 카트리지의 것이며, 한국판처럼 놀이방(미니게임)은
+없습니다. 일본어판(ASMJ)과 미국 영어판(ASME)도 같은 방식으로 만들 수 있고, 유럽판
+덤프 없이 그 덤프 하나만으로도 만들 수 있습니다(미니게임의 GAME OVER 같은
+메시지 그림은 나오지 않습니다). 유럽판의 다섯 언어는 `--language`로 고릅니다.
 
 ## Source
 
