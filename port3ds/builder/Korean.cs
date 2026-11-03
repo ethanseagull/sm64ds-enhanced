@@ -16,7 +16,7 @@ namespace Sm64dsEnhanced
     static class Korean
     {
         public const string Title = "Super Mario 64 DS Enhanced (Korean)";
-        public const string TitleHangul = "슈퍼 마리오 64 DS Enhanced";   // in the Korean slot
+        public const string TitleHangul = "\uC288\uD37C \uB9C8\uB9AC\uC624 64 DS Enhanced";   // in the Korean slot
 
         static readonly string[] Files = {
             "ARCHIVE/c2d.narc", "ARCHIVE/ces.narc", "ARCHIVE/en1.narc",

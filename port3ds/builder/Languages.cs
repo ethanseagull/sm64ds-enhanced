@@ -26,7 +26,7 @@ namespace Sm64dsEnhanced
         // the second dump each takes
         static readonly string[] Dumps = { null, null, null, null, null, "ASMJ", "ASMK", "ASME" };
         // the HOME Menu title in the Japanese slot
-        public const string TitleJapanese = "スーパーマリオ64DS Enhanced";
+        public const string TitleJapanese = "\u30B9\u30FC\u30D1\u30FC\u30DE\u30EA\u30AA64DS Enhanced";
 
         static void Fail(string text) { throw new BuildError(text); }
         static uint U32(byte[] b, long o) { return BitConverter.ToUInt32(b, (int)o); }

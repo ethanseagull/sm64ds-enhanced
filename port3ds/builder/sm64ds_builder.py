@@ -46,7 +46,7 @@ import time
 TITLE = 'Super Mario 64 DS Enhanced'
 TITLE_KOREAN = 'Super Mario 64 DS Enhanced (Korean)'
 TITLE_KOREAN_HANGUL = '\uc288\ud37c \ub9c8\ub9ac\uc624 64 DS Enhanced'   # in the Korean slot
-TITLE_JAPANESE = 'スーパーマリオ64DS Enhanced'   # in the Japanese slot
+TITLE_JAPANESE = '\u30b9\u30fc\u30d1\u30fc\u30de\u30ea\u30aa64DS Enhanced'   # in the Japanese slot
 AUTHOR = 'ethanseagull'
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.join(HERE, 'builder-files')

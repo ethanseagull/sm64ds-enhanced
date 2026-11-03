@@ -171,14 +171,6 @@ cartridge's own (its logo and タッチしてスタート!). The mini-games' mes
 (GAME OVER, YOU WIN and the like) are pictures only the European cartridge
 has, so they don't show; the games themselves play as usual.
 
-한국어판은 유럽판 덤프(ASMP)와 한국판 덤프(ASMK)가 둘 다 필요합니다. Windows
-빌더에서 한국판 덤프를 고르면 유럽판 덤프를 이어서 묻고, `Super Mario 64 DS
-Enhanced (Korean).cia`를 만듭니다. 대사, 코스·별 이름, 메뉴, 일시정지·저장
-화면, 타이틀이 모두 한국판 카트리지의 것이며, 한국판처럼 놀이방(미니게임)은
-없습니다. 일본어판(ASMJ)과 미국 영어판(ASME)도 같은 방식으로 만들 수 있고, 유럽판
-덤프 없이 그 덤프 하나만으로도 만들 수 있습니다(미니게임의 GAME OVER 같은
-메시지 그림은 나오지 않습니다). 유럽판의 다섯 언어는 `--language`로 고릅니다.
-
 ## Source
 
 Everything in the release is built from this repository:
