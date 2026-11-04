@@ -153,6 +153,7 @@ shaderProgram_s g_prog;
 int g_loc_proj;
 C3D_Mtx g_proj;
 const C3D_Mtx *g_cur_proj = &g_proj;   // the drawn target's (frame_target)
+C3D_RenderTarget *g_drawing;           // the screen target frame_target or resolve drew on
 
 // Step 5 record path (draw_record, shaders/gx_rec.v.pica): its own program,
 // vertex layout and buffers. Vertices are ntr::GxRecVertex as-is (x, y, z,
@@ -1034,6 +1035,7 @@ void frame_target(Screen s, uint32_t clear_argb, bool scene)
     // Depth clears to the far value, 0 (depth is stored reversed, see pass_state).
     C3D_RenderTargetClear(t, C3D_CLEAR_ALL, rgba, 0);
     C3D_FrameDrawOn(t);
+    g_drawing = t;
     if (g_ss_active) C3D_SetViewport(0, 0, g_ss_w, g_ss_h);   // not the texture's full width
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, g_loc_proj, proj);
     g_cur_proj = proj;
@@ -1164,6 +1166,7 @@ void resolve()
     g_ss_active = false;
     g_tgt_kx = g_tgt_ky = 1;
     C3D_FrameDrawOn(g_top);
+    g_drawing = g_top;
     C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, g_loc_proj, &g_proj);
     g_cur_proj = &g_proj;
     if (g_used + 6 > g_vhi) return;
@@ -2456,6 +2459,11 @@ bool sharp_ready()
 }
 }  // namespace
 
+bool sharp_available()
+{
+    return sharp_ready();
+}
+
 bool overlay_sharpen(int slot, int w, int h)
 {
     if (w <= 0 || h <= 0 || w * 2 > 512 || h * 2 > 512 || !sharp_ready()) return false;
@@ -2518,6 +2526,95 @@ void overlay_draw_sharp(const Viewport &vp, OverlayMode mode)
     C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_TEXTURE0, GPU_TEXTURE0);
     C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
     overlay_draw_modes(first, mode, false);
+}
+
+// The main screen's 2D at 1.25x (320x192 in 400x240): sharp, as the other
+// screen. Nearest made the strokes of text alternate between one and two
+// pixels wide, worst in the Korean and Japanese fonts' 1bpp glyphs. The 2x
+// pass shares the 512x512 target (no VRAM to spare for a 1024 one), so a
+// picture wider than 256 goes in 256-column strips: each drawn 2x into it and
+// its middle bilinear to the screen, a column past each seam inside the strip
+// so the filter reads across it. The other screen's overlay_sharpen draws
+// again after this. GAME3DS_SHARP_MAIN=0 draws nearest.
+void overlay_draw_scaled(int slot, OverlayMode mode, const Viewport &vp)
+{
+    static const bool off = getenv("GAME3DS_SHARP_MAIN") && atoi(getenv("GAME3DS_SHARP_MAIN")) == 0;
+    const bool transferred = slot >= kTransferBase;
+    const int i = transferred ? slot - kTransferBase : slot;
+    const bool valid = transferred ? i < g_ovt_used : (slot >= 0 && slot < g_ov_used);
+    const int w = !valid ? 0 : transferred ? g_ovt_w[i] : g_ov_w[i];
+    const int h = !valid ? 0 : transferred ? g_ovt_h[i] : g_ov_h[i];
+    auto whole = [](float k) { return fabsf(k - roundf(k)) < 0.001f; };
+    // 256 columns at 2x fill the target's 512 (the only width its texel
+    // mapping, overlay_draw_sharp's, is used at)
+    if (off || w < 256 || h <= 0 || h * 2 > 512 || g_ss_active || !g_drawing ||
+        (whole(vp.w / (float)w) && whole(vp.h / (float)h)) || !sharp_ready()) {
+        overlay_draw(slot, mode, vp);
+        return;
+    }
+    // KEPT's verdicts are exact alphas, and the bilinear edges fall between
+    // them: KEPT_BLEND's third pass draws those. A FRONT or BLEND word's colour
+    // is its share and a NONE word is 0, so the mixed word blends as the mix of
+    // the pixels would.
+    const OverlayMode m = mode == OVERLAY_KEPT ? OVERLAY_KEPT_BLEND : mode;
+    const C3D_Mtx *const proj = g_cur_proj;
+    const int W = 512, H = h * 2;
+    const int n = w == 256 ? 1 : (w + 253) / 254;   // strips of up to 254 columns
+    const int cw = (w + n - 1) / n;
+    for (int k = 0; k < n; ++k) {
+        const int c0 = k * cw, c1 = c0 + cw < w ? c0 + cw : w;
+        if (c0 >= c1) break;
+        int u0 = c0 - (256 - (c1 - c0)) / 2;   // its 256 columns, centred on c0..c1
+        if (u0 > w - 256) u0 = w - 256;
+        if (u0 < 0) u0 = 0;
+        C3D_FrameDrawOn(g_sb);
+        C3D_SetViewport(0, 0, (u32)H, (u32)W);
+        Mtx_OrthoTilt(&g_sb_proj, 0.0f, (float)W, (float)H, 0.0f, 0.0f, 1.0f, false);
+        C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, g_loc_proj, &g_sb_proj);
+        g_cur_proj = &g_sb_proj;
+        Viewport v2;
+        v2.x = 0.0f;
+        v2.y = 0.0f;
+        v2.w = (float)W;
+        v2.h = (float)H;
+        overlay_draw_part(slot, OVERLAY_OPAQUE, v2, (float)u0, 0.0f, (float)(u0 + 256), (float)h);
+        // back on the screen, as it was
+        C3D_FrameDrawOn(g_drawing);
+        C3D_FVUnifMtx4x4(GPU_VERTEX_SHADER, g_loc_proj, proj);
+        g_cur_proj = proj;
+        if (g_used + 6 > g_vhi) break;
+        // columns c0..c1 of the picture: on the screen, and on the 2x picture
+        const float x0 = vp.x + vp.w * (float)c0 / (float)w, x1 = vp.x + vp.w * (float)c1 / (float)w;
+        const float a = (float)((c0 - u0) * 2), b = (float)((c1 - u0) * 2);
+        const float px[6] = {a, b, a, b, b, a};
+        const float py[6] = {0, 0, (float)H, 0, (float)H, (float)H};
+        const float sx[6] = {x0, x1, x0, x1, x1, x0};
+        const size_t first = g_used;
+        for (int v = 0; v < 6; ++v) {
+            const C3D_FVec *r = g_sb_proj.r;
+            const float cwv = r[3].x * px[v] + r[3].y * py[v] + r[3].w;
+            const float cx = (r[0].x * px[v] + r[0].y * py[v] + r[0].w) / cwv;
+            const float cy = (r[1].x * px[v] + r[1].y * py[v] + r[1].w) / cwv;
+            Vtx &o = g_vbo[g_used++];
+            o.x = sx[v];
+            o.y = vp.y + vp.h * py[v] / (float)H;
+            o.z = 0.0f;
+            o.w = 1.0f;
+            o.s = (cx + 1.0f) * 0.5f * (float)H / 512.0f;
+            o.t = (cy + 1.0f) * 0.5f;   // W is the texture's 512
+            o.r = o.g = o.b = o.a = 1.0f;
+            o.fs = 0.0f;
+            o.ft = 0.5f;
+        }
+        C3D_TexBind(0, &g_sb_tex);
+        C3D_TexEnv *env = C3D_GetTexEnv(0);
+        C3D_TexEnvInit(env);
+        C3D_TexEnvSrc(env, C3D_Both, GPU_TEXTURE0, GPU_TEXTURE0, GPU_TEXTURE0);
+        C3D_TexEnvFunc(env, C3D_Both, GPU_REPLACE);
+        overlay_draw_modes(first, m, false);
+    }
+    g_sb_src = -1;   // not overlay_sharpen's picture any more
+    g_sb_gen = 0;
 }
 
 // The affine BG's textures: two in turn, as the HUD's (a frame built ahead,
