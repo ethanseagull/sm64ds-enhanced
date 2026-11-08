@@ -7,17 +7,27 @@ newer; it needs nothing else but the builder-files folder beside it.
 
   python3 sm64ds_builder.py                        asks for the dump
   python3 sm64ds_builder.py DUMP.nds [-o OUT.cia]  [--option KEY=VALUE ...]
+  python3 sm64ds_builder.py DUMP.nds --language fr the game in French (en, fr, de,
+                                                   it or es; English if not given)
+  python3 sm64ds_builder.py DUMP.nds OTHER.nds     the Japanese, Korean or American
+                                                   English edition, with a dump of
+                                                   that cartridge too
+  python3 sm64ds_builder.py USA.nds                the American English (or, from the
+                                                   Japanese cartridge, Japanese)
+                                                   edition from that dump alone
 
 The .cia goes next to the dump unless -o says otherwise. --option sets what
 the game starts with: console=new|old (first: it sets that console's 60 fps
 and anti-aliasing), 60fps=, anti_aliasing=, fps_counter=, analog_controls=
 (1 or 0).
 
-It is Builder.cs, Extract.cs, Face.cs and Settings.cs in Python, made to give
-the same files to the bit: the game data out of the dump (European ROM only,
-hash-checked), the RomFS, the HOME Menu icon from the DS icon, the 3D banner
-from the dump's own files, and the icon, sound and banner formats bannertool
-writes for the .exe. makerom (builder-files) builds the .cia.
+It is Builder.cs, Extract.cs, Face.cs, Korean.cs, Languages.cs, Regions.cs
+and Settings.cs in Python, made to give the same files to the bit: the game
+data out of the dump (the European ROM, or the American or Japanese one by
+builder-files' region kits; hash-checked), the RomFS, the HOME Menu icon from
+the DS icon, the 3D banner from the dump's own files, and the icon, sound and
+banner formats bannertool writes for the .exe. makerom (builder-files) builds
+the .cia.
 """
 import argparse
 import hashlib
@@ -34,6 +44,9 @@ import tempfile
 import time
 
 TITLE = 'Super Mario 64 DS Enhanced'
+TITLE_KOREAN = 'Super Mario 64 DS Enhanced (Korean)'
+TITLE_KOREAN_HANGUL = '\uc288\ud37c \ub9c8\ub9ac\uc624 64 DS Enhanced'   # in the Korean slot
+TITLE_JAPANESE = '\u30b9\u30fc\u30d1\u30fc\u30de\u30ea\u30aa64DS Enhanced'   # in the Japanese slot
 AUTHOR = 'ethanseagull'
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.join(HERE, 'builder-files')
@@ -420,6 +433,1038 @@ def extract(rom_bytes, recipe_path, manifest_path, log, progress):
     return files, assets
 
 
+# --- the language editions (Korean.cs, Languages.cs) -------------------------
+# The game is the European ROM's code, which has five languages (English,
+# French, German, Italian and Spanish) and picks one by the DS owner's
+# language. The 3DS has none, so the game is English unless the .cia says
+# otherwise: --language picks the one it runs in. The Japanese, Korean and
+# American English editions also take a second dump, of that cartridge (ASMJ,
+# ASMK, ASME), for its text and the pictures with words in them, which go in
+# the European files of the language slot the game then runs as.
+# build/assets/langpack.bin tells the game (game/language.cpp reads it):
+#
+#   0x00  "SM64DS-LANGPACK\0", u32 version (1), u32 size
+#   0x18  the language's code, 8 bytes ("ja", "en-us", ...)
+#   0x20  u8 the DS language the game runs as (1 English, 2 French, 3 German,
+#         4 Italian, 5 Spanish), u8 flags (1: the font widths follow)
+#   0x40  the font's widths (256), the big font's widths (256)
+
+LANGUAGES = {   # code: (name, the DS language the game runs as, the second dump it takes)
+    'en': ('English', 1, None), 'fr': ('French', 2, None), 'de': ('German', 3, None),
+    'it': ('Italian', 4, None), 'es': ('Spanish', 5, None),
+    'ja': ('Japanese', 1, 'ASMJ'), 'ko': ('Korean', 5, 'ASMK'), 'en-us': ('American English', 1, 'ASME'),
+}
+DUMP_LANGUAGE = {v[2]: k for k, v in LANGUAGES.items() if v[2]}   # a second dump's game code: its language
+REGION = {'ASMJ': 'Japanese', 'ASMK': 'Korean', 'ASME': 'American'}
+
+
+def edition_title(language):
+    """The .cia's title (and file name) for a language."""
+    if language in (None, 'en'):
+        return TITLE
+    if language == 'ko':
+        return TITLE_KOREAN
+    return f'{TITLE} ({LANGUAGES[language][0]})'
+
+
+def edition_slots(language):
+    """The HOME Menu title in the language's own slot, where it has its own."""
+    if language == 'ko':
+        return {7: (TITLE_KOREAN_HANGUL, TITLE_KOREAN_HANGUL)}
+    if language == 'ja':
+        return {0: (TITLE_JAPANESE, TITLE_JAPANESE)}
+    return None
+
+
+def langpack(language, widths=b''):
+    """build/assets/langpack.bin (above)."""
+    return (b'SM64DS-LANGPACK\0' + struct.pack('<II', 1, 0x40 + len(widths)) +
+            language.encode('ascii').ljust(8, b'\0') +
+            struct.pack('<BB', LANGUAGES[language][1], 1 if widths else 0) + bytes(0x1E) + widths)
+
+
+def nitro_files(rb, want, who):
+    """{path: bytes} of the NitroFS files named in want (case-blind paths)."""
+    fnt_off, fnt_size, fat_off, fat_size = struct.unpack_from('<4I', rb, 0x40)
+    if fnt_off == 0 or fnt_off + fnt_size > len(rb) or fat_off == 0 or fat_off + fat_size > len(rb):
+        raise BuildError(f'The {who} dump is truncated: its file tables run past the end of the file. '
+                         'Re-dump the cartridge.')
+    damaged = f"The {who} dump's file name table is damaged. Re-dump the cartridge."
+    wanted = {p.lower(): p for p in want}
+    out = {}
+    queue, visited = [(0, '')], {0}
+    while queue:
+        dir_id, base = queue.pop(0)
+        entry = fnt_off + dir_id * 8
+        if entry + 8 > len(rb):
+            raise BuildError(damaged)
+        o = fnt_off + u32(rb, entry)
+        file_id = u16(rb, entry + 4)
+        while True:
+            if o >= len(rb):
+                raise BuildError(damaged)
+            typ = rb[o]
+            o += 1
+            if typ == 0:
+                break
+            n = typ & 0x7F
+            if o + n + (2 if typ & 0x80 else 0) > len(rb):
+                raise BuildError(damaged)
+            full = (base + '/' if base else '') + rb[o:o + n].decode('ascii', 'replace')
+            o += n
+            if typ & 0x80:
+                sub = u16(rb, o) & 0x0FFF
+                o += 2
+                if sub not in visited:
+                    visited.add(sub)
+                    queue.append((sub, full))
+            else:
+                if full.lower() in wanted and file_id < fat_size // 8:
+                    start, end = struct.unpack_from('<II', rb, fat_off + file_id * 8)
+                    if start <= end <= len(rb):
+                        out[wanted[full.lower()]] = rb[start:end]
+                file_id += 1
+    return out
+
+
+def files_sha(files, paths):
+    """One hash over the files a language takes, in paths' order."""
+    h = hashlib.sha256()
+    for p in paths:
+        h.update(p.encode('ascii') + b'\0' + hashlib.sha256(files[p]).digest())
+    return h.hexdigest()
+
+
+def second_dump(rb, language):
+    """Checks the second dump is the cartridge the language takes; its arm9."""
+    code, who = LANGUAGES[language][2], REGION[LANGUAGES[language][2]]
+    if len(rb) < 0x4000:
+        raise BuildError(f'The {who} dump is only {len(rb)} bytes, too small to be a DS cartridge dump.')
+    have = rb[0x0C:0x10].decode('ascii', 'replace')
+    if rb[0:12].rstrip(b'\0') != b'S.MARIO64DS' or have != code:
+        raise BuildError(f"The second dump is not the {who} Super Mario 64 DS (game code "
+                         f"{re.sub('[^ -~]', '.', have)}, not {code}).")
+    a9 = u32(rb, 0x20)
+    try:
+        return expand_blz(rb[a9:a9 + u32(rb, 0x2C)])
+    except ValueError as e:
+        raise BuildError(f"Could not read the {who} dump's program data ({e}). Re-dump the cartridge.")
+
+
+def not_that_cartridge(language):
+    code, who = LANGUAGES[language][2], REGION[LANGUAGES[language][2]]
+    return BuildError(f'This is a {who} dump (game code {code}), but its contents do not match the cartridge this '
+                      'build was made from. That usually means the file has been modified (a patch or a trimmed '
+                      'dump), the dump is faulty, or it is another revision of the cartridge. Use an untouched '
+                      'dump of your own retail cartridge, then try again.')
+
+
+def replace_files(files, assets, new, who):
+    """new {path: bytes} over the European files, and the file tables to match.
+    A file that grew moves past the end of the cartridge's data (the game's card
+    serves whatever the allocation table points at); one that didn't stays.
+    Returns how many entries of the file table changed."""
+    rows = assets['files.tsv'].decode().splitlines(True)
+    id_by_path = {}
+    for line in rows[1:]:
+        f = line.rstrip('\n').split('\t')
+        id_by_path[f[2].lower()] = int(f[0])
+    fat = bytearray(assets['nitrofs_fat.bin'])
+    top = max(u32(fat, i * 8 + 4) for i in range(len(fat) // 8))
+    at = (top + 0x1FF) & ~0x1FF
+    size_by_id = {}
+    for p in sorted(new, key=lambda p: id_by_path[p.lower()]):
+        i = id_by_path[p.lower()]
+        start, end = struct.unpack_from('<II', fat, i * 8)
+        size = len(new[p])
+        if size > end - start:
+            start, at = at, (at + size + 0x1FF) & ~0x1FF
+        struct.pack_into('<II', fat, i * 8, start, start + size)
+        size_by_id[i] = size
+        files[p] = new[p]
+    if at > 0x8000000:   # the game's card reads any 32-bit address; mods' range starts at 0x10000000
+        raise BuildError(f"The {who} files don't fit the cartridge's address space.")
+    assets['nitrofs_fat.bin'] = bytes(fat)
+
+    def resize(name, id_col):
+        lines = assets[name].decode().splitlines(True)
+        out = [lines[0]]
+        for line in lines[1:]:
+            f = line.rstrip('\n').split('\t')
+            i = int(f[id_col])
+            if i in size_by_id:
+                f[-1] = str(size_by_id[i])
+            out.append('\t'.join(f) + '\n')
+        assets[name] = ''.join(out).encode()
+    resize('files.tsv', 0)
+    resize('handles.tsv', 2)
+    return len(size_by_id)
+
+
+def lz77_wrap(raw):
+    """The game's LZ77 file around raw bytes, as literal runs."""
+    out = bytearray(b'LZ77' + bytes((0x10, len(raw) & 0xFF, len(raw) >> 8 & 0xFF, len(raw) >> 16 & 0xFF)))
+    for i in range(0, len(raw), 8):
+        out.append(0)
+        out += raw[i:i + 8]
+    return bytes(out)
+
+
+def bmd_find(bmd, table, count, stride, name, size):
+    """The data offset of the BMD texture (table 0x18) or palette (0x20) called
+    name, which must be size bytes (None: any; then (offset, size))."""
+    for i in range(u32(bmd, count)):
+        e = u32(bmd, table) + i * stride
+        n = u32(bmd, e)
+        if bmd[n:bmd.index(b'\0', n)] == name.encode('ascii'):
+            if size is None:
+                return u32(bmd, e + 4), u32(bmd, e + 8)
+            if u32(bmd, e + 8) != size:
+                break
+            return u32(bmd, e + 4)
+    raise BuildError("The title screen's textures aren't the ones this build knows. Re-dump the cartridge.")
+
+
+def narc_members(narc):
+    """({member path: index}, {section magic: offset}) of a NARC archive."""
+    bad = BuildError("One of the game's archives isn't one this build can read. Re-dump the cartridge.")
+    if narc[:4] != b'NARC' or len(narc) < 16:
+        raise bad
+    sections, at = {}, u16(narc, 0x0C)
+    for _ in range(u16(narc, 0x0E)):
+        if at + 8 > len(narc):
+            raise bad
+        sections[narc[at:at + 4]] = at
+        at += u32(narc, at + 4)
+    if b'BTAF' not in sections or b'BTNF' not in sections or b'GMIF' not in sections:
+        raise bad
+    fnt = sections[b'BTNF'] + 8
+    names, queue = {}, [(0, '')]
+    while queue:
+        d, base = queue.pop(0)
+        o, fid = fnt + u32(narc, fnt + d * 8), u16(narc, fnt + d * 8 + 4)
+        while True:
+            typ = narc[o]
+            o += 1
+            if typ == 0:
+                break
+            full = (base + '/' if base else '') + narc[o:o + (typ & 0x7F)].decode('ascii', 'replace')
+            o += typ & 0x7F
+            if typ & 0x80:
+                queue.append((u16(narc, o) & 0x0FFF, full))
+                o += 2
+            else:
+                names[full] = fid
+                fid += 1
+    return names, sections
+
+
+def narc_files(narc):
+    """[bytes] of each member of a NARC, by index."""
+    _, s = narc_members(narc)
+    fat, img = s[b'BTAF'], s[b'GMIF'] + 8
+    return [narc[img + u32(narc, fat + 12 + i * 8):img + u32(narc, fat + 16 + i * 8)]
+            for i in range(u16(narc, fat + 8))]
+
+
+def narc_get(narc, name):
+    names, _ = narc_members(narc)
+    if name not in names:
+        raise BuildError(f"An archive has no {name}. Re-dump the cartridge.")
+    return narc_files(narc)[names[name]]
+
+
+def narc_replace(narc, new):
+    """The NARC with the members in new {path: bytes} replaced: the names kept,
+    the data laid out again (each member 4-byte aligned)."""
+    names, s = narc_members(narc)
+    data = narc_files(narc)
+    for name, b in new.items():
+        data[names[name]] = b
+    btaf, gmif = bytearray(b'BTAF' + struct.pack('<IHH', 12 + 8 * len(data), len(data), 0)), bytearray()
+    for b in data:
+        btaf += struct.pack('<II', len(gmif), len(gmif) + len(b))
+        gmif += b + b'\xff' * (-len(b) & 3)
+    btnf = narc[s[b'BTNF']:s[b'BTNF'] + u32(narc, s[b'BTNF'] + 4)]
+    body = bytes(btaf) + btnf + b'GMIF' + struct.pack('<I', 8 + len(gmif)) + bytes(gmif)
+    return narc[:8] + struct.pack('<I', 16 + len(body)) + narc[12:16] + body
+
+
+# --- the Korean edition (Korean.cs) -----------------------------------------
+# From the Korean cartridge (ASMK): its message bank, the graphics it changed
+# (the Korean art is in the Spanish slot, which the game then uses), and
+# korean.bin, its arm9's font and text tables (game/korean.cpp reads it).
+
+KOREAN_FILES = (
+    'ARCHIVE/c2d.narc', 'ARCHIVE/ces.narc', 'ARCHIVE/en1.narc',
+    'data/2D_cad/EUR/SPA/d_2d_cmn_icon_S_ncg.bin', 'data/2D_cad/EUR/SPA/d_2d_staff_roll_cake_8bit_S_ncg.bin',
+    'data/2D_cad/EUR/d_2d_scenario_player_select_S_ncg.bin',
+    'data/2D_cad/EUR/d_2d_scenario_player_select_course_number_BG_S_ncg.bin',
+    'data/2D_cad/EUR/d_2d_staff_roll_end_EUR_ncg.bin', 'data/2D_cad/d_2d_game_over_ncg.bin',
+    'data/2D_cad/d_2d_mario_3Dfont_ncl.bin', 'data/2D_cad/d_2d_scenario_player_select_course_number_BG_nsc.bin',
+    'data/2D_cad/d_2d_upr_touch_to_select_nsc.bin',
+    'data/DSMT/EUR/file_menu_S_ncg.bin', 'data/DSMT/EUR/title_demo_S_ncg.bin',
+    'data/DSMT/EUR/texBank_E.bmd',
+    'data/message/msg_data_hn.bin',
+)
+# every language's bank becomes the Korean one
+KOREAN_BANK = 'data/message/msg_data_hn.bin'
+BANK_SLOTS = ('data/message/msg_data_eng.bin', 'data/message/msg_data_frn.bin',
+              'data/message/msg_data_gmn.bin', 'data/message/msg_data_itl.bin',
+              'data/message/msg_data_spn.bin')
+# korean.bin's parts out of the Korean arm9: (address, size, padded size, sha256)
+KOREAN_ARM9 = (
+    (0x020891E8, 0x6C40, 0x6C40, 'd00ef99b3d932d96a9028a918ec1743228f9d8c58ab723989477a2615b72308d'),   # font
+    (0x020900FC, 0x100, 0x100, '432081527a8d6515bcb8c241a291adc3a0b5361450d7041b027921d8e55eb291'),     # widths
+    (0x020901FC, 0x100, 0x100, '6dc062862651f497461da6abd52887a1baa2cf20f2fb2400425879ae47b211a3'),     # big font's
+    (0x0208FEEC, 0x68, 0x68, '41260aa68d9300ee3b58696a3df4b85b93912d1e48be209cf05bca475a063569'),       # its codes
+    (0x0208FE64, 7, 8, 'd86891d09c437337e5582db342a88d38e598ad47ee4ff43a0527868fd0175130'),             # icons
+    (0x0208FE78, 0x14, 0x14, '63027dc0325e47496c74e01cfea8e4bed36aabe0acd59074dd5d3e8722fc09aa'),       # digits
+    (0x0208FF54, 0x1A8, 0x1A8, '92cf5aafe424f7ec58490a1d92246f61c4832cc1d769a4a48fa2731372ce95c5'),     # message ids
+)
+KOREAN_FILES_SHA = '040ed1bab9155b35457bc54335e1816943623f41635b9101b630811e1eac1599'   # files_sha of the retail cartridge
+
+
+def korean_extract(kb, log):
+    """{'files': {path: bytes}, 'korean.bin': bytes} out of the Korean dump."""
+    arm9 = second_dump(kb, 'ko')
+    log(f'Super Mario 64 DS (ASMK, Korea), {round(len(kb) / 1048576)} MB')
+    files = nitro_files(kb, KOREAN_FILES, 'Korean')
+    missing = [p for p in KOREAN_FILES if p not in files]
+    if missing:
+        raise BuildError(f"The Korean dump has no {missing[0]}. Re-dump the cartridge.")
+    body = bytearray()
+    for addr, size, padded, want in KOREAN_ARM9:
+        o = addr - 0x02004000
+        part = arm9[o:o + size]
+        if len(part) != size or sha256(part) != want or files_sha(files, KOREAN_FILES) != KOREAN_FILES_SHA:
+            raise not_that_cartridge('ko')
+        body += part + bytes(padded - size)
+    head = b'SM64DS-KOREAN' + bytes(3) + struct.pack('<II', 1, 0x20 + len(body)) + bytes(8)
+    log(f'    the Korean text: {len(files)} files and the font, checksums OK')
+    return {'files': files, 'korean.bin': head + bytes(body)}
+
+
+KOREAN_TEXBANK = 'data/DSMT/EUR/texBank_E.bmd'      # the Korean cartridge's (all its menu art)
+KOREAN_TEXBANK_S = 'data/DSMT/EUR/texBank_S.bmd'
+
+
+def nearest(c, choices, pal_):
+    return min(choices, key=lambda j: sum((a - b) ** 2 for a, b in zip(c, pal_[j])))
+
+
+def bmd_colours(b, at, n):
+    return [(c & 31, c >> 5 & 31, c >> 10 & 31) for c in (u16(b, at + i * 2) for i in range(n))]
+
+
+def korean_texbanks(eu_e, eu_s, ko):
+    """The title menu's two texture banks (texBank_E, texBank_S) for the Korean
+    edition: the European banks, which the game's menu is made for, with the
+    Korean cartridge's pictures in them. The menu runs in the Spanish slot as the
+    Korean one does, so texBank_S's file and title menus are the ones shown; the
+    Korean title menu has no Rec Room and its wrench and arrows elsewhere, so it
+    is the European picture's VS, wrench and arrows in the Korean palette's
+    nearest colours, the Korean ADVENTURE (128 wide, squeezed to the European
+    button's 120), and nothing where the Rec Room was."""
+    e, s, k = bytearray(lz77(eu_e)), bytearray(lz77(eu_s)), lz77(ko)
+    tex = lambda b, n, size: bmd_find(b, 0x18, 0x14, 20, n, size)
+    pal = lambda b, n, size: bmd_find(b, 0x20, 0x1C, 16, n, size)
+
+    # the file menu: the same layout in both
+    fm, fmp = tex(k, 'file_menu_K', 0x10000), pal(k, 'file_menu_F_pl', 0x200)
+    for b, t, p in ((e, 'file_menu_U', 'file_menu_U_pl'), (s, 'file_menu_S', 'file_menu_S_pl')):
+        at, pat = tex(b, t, 0x10000), pal(b, p, 0x200)
+        b[at:at + 0x10000] = k[fm:fm + 0x10000]
+        b[pat:pat + 0x200] = k[fmp:fmp + 0x200]
+
+    # the title menu
+    et, ep = tex(e, 'title_menu_E', 0x4000), pal(e, 'title_menu_E_pl', 0x200)
+    kt, kp = tex(k, 'title_menu_K', 0x4000), pal(k, 'title_menu_K_pl', 0x200)
+    epal, kpal = bmd_colours(e, ep, 256), bmd_colours(k, kp, 256)
+    near = [0] + [nearest(epal[i], range(1, 256), kpal) for i in range(1, 256)]
+    menu = bytearray(near[v] for v in e[et:et + 0x4000])
+    for y in range(80, 120):            # the Rec Room
+        menu[y * 128:y * 128 + 64] = bytes(64)
+    for y in range(40, 80):             # ADVENTURE
+        for x in range(120):
+            menu[y * 128 + 4 + x] = k[kt + y * 128 + x * 128 // 120]
+    for b, t, p in ((e, 'title_menu_E', 'title_menu_E_pl'), (s, 'title_menu_S', 'title_menu_S_pl')):
+        at, pat = tex(b, t, 0x4000), pal(b, p, 0x200)
+        b[at:at + 0x4000] = menu
+        b[pat:pat + 0x200] = k[kp:kp + 0x200]
+
+    # the options screen: the same layout, but the European part loads 200
+    # colours, so the Korean colours past 200 become their nearest below
+    ot, op = tex(k, 'title_option', 0x4000), pal(k, 'title_option', 0x200)
+    opal = bmd_colours(k, op, 256)
+    below = list(range(200)) + [nearest(opal[i], range(1, 200), opal) for i in range(200, 256)]
+    at, pat = tex(e, 'title_option_EU', 0x4000), pal(e, 'title_option_pl', 0x190)
+    e[at:at + 0x4000] = bytes(below[v] for v in k[ot:ot + 0x4000])
+    e[pat:pat + 0x190] = k[op:op + 0x190]
+    # and its OK button, which the Spanish slot takes from title_opt_ok (two
+    # buttons, 80 and 96 wide): the Korean OK (64x32 at 192, 32) in each
+    at, pat = tex(e, 'title_opt_ok', 0x2000), pal(e, 'title_opt_ok', 0x200)
+    ok = bytearray(0x2000)
+    for y in range(32):
+        row = k[ot + (32 + y) * 256 + 192:ot + (32 + y) * 256 + 256]
+        ok[y * 256 + 8:y * 256 + 72] = row
+        ok[y * 256 + 96:y * 256 + 160] = row
+    e[at:at + 0x2000] = ok
+    e[pat:pat + 0x200] = k[op:op + 0x200]
+    return lz77_wrap(bytes(e)), lz77_wrap(bytes(s))
+
+
+def korean_apply(files, assets, ko, log):
+    """The Korean files over the European ones."""
+    new = {p: ko['files'][p] for p in KOREAN_FILES if p != KOREAN_BANK}
+    for p in BANK_SLOTS:
+        new[p] = ko['files'][KOREAN_BANK]
+    del new[KOREAN_TEXBANK]
+    new[KOREAN_TEXBANK], new[KOREAN_TEXBANK_S] = korean_texbanks(files[KOREAN_TEXBANK], files[KOREAN_TEXBANK_S],
+                                                                 ko['files'][KOREAN_TEXBANK])
+    changed = replace_files(files, assets, new, 'Korean')
+    assets['korean.bin'] = ko['korean.bin']
+    assets['langpack.bin'] = langpack('ko')
+    log(f'    {len(new)} files Korean, {changed} entries in the file table updated')
+
+
+# --- the Japanese and American editions (Languages.cs) ----------------------
+# The American cartridge (ASME) and the Japanese one (ASMJ) are one game: both
+# have the English and the Japanese text, and each its own pictures. Their
+# code is the European English code (the European game added the other four
+# languages beside it), so either edition runs in the English slot: its
+# message bank in every slot's, its pictures in the English files, its fonts
+# and their widths for the European ones.
+#
+# The Japanese font numbers its characters differently: the European code
+# writes some itself (the space, the stars, the coin, the times sign, the dash
+# and the digits) as the European font numbers them. The Japanese edition
+# moves those characters to the European numbers, and the characters the
+# European numbers held to where they were, in both fonts, their widths and
+# the text: JAPANESE_MOVES, (Japanese number, European number).
+
+JAPANESE_MOVES = ((0xF1, 0x4D), (0xCC, 0xF0), (0xCD, 0xF1), (0xCE, 0xEE), (0xCF, 0xEF), (0xCA, 0x47),
+                  (0x48, 0x00), (0x49, 0x01), (0x4A, 0x02), (0x4B, 0x03), (0x4C, 0x04), (0x4D, 0x05),
+                  (0x4E, 0x06), (0x4F, 0x07), (0x58, 0x08), (0x59, 0x09))
+MG_PICTURES = ('MG/d_2d_mg_bg_option_nsc.bin', 'MG/d_2d_mg_card_ncg.bin', 'MG/d_2d_mg_common_ncg.bin',
+               'MG/d_2d_mg_jump_ncg.bin', 'MG/d_2d_mg_menu_touch_ncg.bin', 'MG/d_2d_mg_option_ncg.bin',
+               'MG/d_2d_mg_pazzle_panel_ncg.bin', 'MG/d_2d_mg_smart_ball_lay00_ncg.bin',
+               'MG/d_2d_mg_smart_ball_lay01_ncg.bin', 'MG/d_2d_mg_trampoline_ncg.bin')
+EU_FONT = 'data/2D_cad/EUR/d_2d_mario_3Dfont_PAL_ncg.bin'
+EU_BIG_FONT = 'data/2D_cad/EUR/d_2d_mario_3Dfont_16_16_PAL_ncg.bin'
+EU_TEXBANK = 'data/DSMT/EUR/texBank_E.bmd'
+ENG = 'data/2D_cad/EUR/ENG/'
+
+
+def region_spec(language):
+    """What the Japanese or American edition takes from its cartridge."""
+    j = language == 'ja'
+    d, u, us = ('JPN/', '', '') if j else ('USA/', '_U', '_US')
+    files = {   # the cartridge's file: the European file it becomes
+        f'data/2D_cad/{d}d_2d_battle_framework_course_select{u}_nsc.bin':
+            'data/2D_cad/EUR/d_2d_battle_framework_course_select_P_nsc.bin',
+        f'data/2D_cad/{d}d_2d_battle_framework_gamestart{u}_nsc.bin':
+            'data/2D_cad/EUR/d_2d_battle_framework_gamestart_P_nsc.bin',
+        f'data/2D_cad/{d}d_2d_cmn_icon{u}_ncg.bin': ENG + 'd_2d_cmn_icon_E_ncg.bin',
+        f'data/DSMT/{d}face_demo_big_yoshistar{u}.bca': 'data/DSMT/EUR/face_demo_big_yoshistar_U.bca',
+        f'data/normal_obj/opening/{d}peach_letter{us}.bmd': 'data/normal_obj/opening/EUR/peach_letter_US.bmd',
+    }
+    if j:
+        files.update({p: p for p in MG_PICTURES})
+    members = {   # its ARCHIVE/c2d.narc's: the member of the European ARCHIVE/cee.narc it becomes
+        f'data/2D_cad/{d}d_2d_battle_btm_course_player_select{u}_ncg.bin':
+            ENG + 'd_2d_battle_btm_course_player_select_EU_ncg.bin',
+        f'data/2D_cad/{d}d_2d_battle_cmn_icon{u}_ncg.bin': ENG + 'd_2d_battle_cmn_icon_E_ncg.bin',
+        f'data/2D_cad/{d}d_2d_battle_upr_course_player_select{u}_ncg.bin':
+            ENG + 'd_2d_battle_upr_course_player_select_EU_ncg.bin',
+        f'data/2D_cad/{d}d_2d_battle_upr_icon{u}_ncg.bin': ENG + 'd_2d_battle_upr_icon_E_ncg.bin',
+        f'data/2D_cad/{d}d_2d_game_over_BG{u}_ncg.bin': ENG + 'd_2d_game_over_BG_E_ncg.bin',
+        f'data/2D_cad/{d}d_2d_touch_select_4bit{u}_ncg.bin': ENG + 'd_2d_touch_select_4bit_E_ncg.bin',
+        f'data/2D_cad/{d}d_2d_upr_icon{u}_ncg.bin': ENG + 'd_2d_upr_icon_E_ncg.bin',
+        f'data/2D_cad/{d}d_2d_upr_play_mode_select{u}_ncg.bin': ENG + 'd_2d_upr_play_mode_select_E_ncg.bin',
+    }
+    p = '' if j else '_US_PAL'
+    return {
+        'files': files, 'members': members,
+        'fonts': (f'data/2D_cad/{d}d_2d_mario_3Dfont{p}_ncg.bin', f'data/2D_cad/{d}d_2d_mario_3Dfont_16_16{p}_ncg.bin'),
+        'bank': 'data/message/msg_data_jpn.bin' if j else 'data/message/msg_data_nes.bin',
+        'texbank': f'data/DSMT/{d}texBank{u}.bmd',
+        # its arm9's font widths (data_0208f074 and data_0208f174 in the European one)
+        'widths': (0x0208DA2C, 0x0208DB2C) if j else (0x0208D90C, 0x0208DA0C),
+        'moves': JAPANESE_MOVES if j else (),
+        'sha': JAPANESE_SHA if j else AMERICAN_SHA,
+    }
+
+
+JAPANESE_SHA = '612355421d33bb4b455288e26f951b6a8f7f200d78cf274e87cf113fc37107f2'   # region_sha of the retail
+AMERICAN_SHA = 'dcdcf53eb1b2a5fbd749068375c9fcb4a93c8b5176c4424ae3bd4bb3a791e709'   # cartridges (Rev 1)
+
+
+def code_map(moves):
+    """Each character's new number for moves ((from, to), ...): those moved,
+    and each one whose number they took to a number they left."""
+    m = list(range(256))
+    for a, b in moves:
+        m[a] = b
+    taken = sorted({b for _, b in moves} - {a for a, _ in moves})
+    freed = sorted({a for a, _ in moves} - {b for _, b in moves})
+    for a, b in zip(taken, freed):
+        m[a] = b
+    return m
+
+
+def move_glyphs(font, m, tiles):
+    """font (4bpp tiles) with each character c's tiles at character m[c]'s."""
+    out = bytearray(font)
+    for c in range(256):
+        for a, b in zip(tiles(c), tiles(m[c])):
+            out[b * 32:b * 32 + 32] = font[a * 32:a * 32 + 32]
+    return bytes(out)
+
+
+def small_tiles(c):   # 8x16: Message::AddChar
+    t = (c & 0x1F) + ((c & 0xE0) << 1)
+    return (t, t + 32)
+
+
+def big_tiles(c):     # 16x16: func_0201b100
+    t = (c & 0xF) * 2 + (c & 0xF0) * 4
+    return (t, t + 1, t + 32, t + 33)
+
+
+def lz10_wrap(raw):
+    """A type-0x10 LZ stream (no "LZ77" in front) of raw bytes, as literal runs."""
+    out = bytearray(bytes((0x10, len(raw) & 0xFF, len(raw) >> 8 & 0xFF, len(raw) >> 16 & 0xFF)))
+    for i in range(0, len(raw), 8):
+        out.append(0)
+        out += raw[i:i + 8]
+    return bytes(out)
+
+
+def recode_bank(bank, m):
+    """A message bank (LZ77) with each character c of its text written m[c];
+    0xFD (a new line), 0xFE (a command, its length next) and 0xFF (the end)
+    stay."""
+    b = bytearray(lz77(bank))
+    if b[:8] != b'GSEM1gmb' or b[0x20:0x24] != b'1FNI':
+        raise BuildError("A message bank isn't one this build can read. Re-dump the cartridge.")
+    info = 0x20
+    count = u16(b, info + 8)
+    data = info + u32(b, info + 4) + 8
+    done = bytearray(len(b))
+    for i in range(count):
+        p = data + u32(b, info + 0x10 + i * 8)
+        while p < len(b) and not done[p]:
+            c = b[p]
+            if c == 0xFF:
+                break
+            if c == 0xFE:
+                n = b[p + 1]
+                if n < 2:
+                    raise BuildError("A message bank isn't one this build can read. Re-dump the cartridge.")
+                done[p:p + n] = b'\1' * n
+                p += n
+                continue
+            done[p] = 1
+            if c != 0xFD:
+                b[p] = m[c]
+            p += 1
+    return lz77_wrap(bytes(b))
+
+
+def region_sha(files, arm9, spec):
+    h = hashlib.sha256()
+    for p in sorted(files):
+        h.update(p.encode('ascii') + b'\0' + hashlib.sha256(files[p]).digest())
+    for a in spec['widths']:
+        h.update(arm9[a - 0x02004000:a - 0x02004000 + 0x100])
+    return h.hexdigest()
+
+
+def region_extract(rb, language, log):
+    """What the Japanese or American edition takes out of its dump: {'files':
+    {path: bytes}, 'widths': the fonts' widths}."""
+    arm9 = second_dump(rb, language)
+    code, who = LANGUAGES[language][2], REGION[LANGUAGES[language][2]]
+    log(f'Super Mario 64 DS ({code}, {"Japan" if language == "ja" else "USA"}), {round(len(rb) / 1048576)} MB')
+    spec = region_spec(language)
+    want = list(spec['files']) + ['ARCHIVE/c2d.narc', spec['bank'], spec['texbank']]
+    files = nitro_files(rb, want, who)
+    missing = [p for p in want if p not in files]
+    if missing:
+        raise BuildError(f"The {who} dump has no {missing[0]}. Re-dump the cartridge.")
+    if region_sha(files, arm9, spec) != spec['sha']:
+        raise not_that_cartridge(language)
+    widths = b''.join(arm9[a - 0x02004000:a - 0x02004000 + 0x100] for a in spec['widths'])
+    log(f'    the {LANGUAGES[language][0]} text: {len(files)} files and the fonts, checksums OK')
+    return {'files': files, 'widths': widths}
+
+
+def region_texbank(eu_e, src, language):
+    """texBank_E (the title, file and options menus) with the cartridge's
+    pictures. The European title menu's picture has its pieces elsewhere (the
+    American and Japanese have the mini-game button where the European has the
+    wrench, and the wrench and arrows below), so they go where the European
+    has them."""
+    e, k = bytearray(lz77(eu_e)), lz77(src)
+    tex = lambda b, n: bmd_find(b, 0x18, 0x14, 20, n, None)
+    pal = lambda b, n: bmd_find(b, 0x20, 0x1C, 16, n, None)
+    j = language == 'ja'
+    u = '' if j else '_U'
+    for kt, kp, et, ep in ((f'file_menu{u}', f'file_menu{u}_pl', 'file_menu_U', 'file_menu_U_pl'),
+                           (f'title_menu{u}', f'title_menu{u}_pl', 'title_menu_E', 'title_menu_E_pl'),
+                           (f'wallpaper_logo{u}', f'wallpaper_logo{u}', 'wallpaper_logo_U', 'wallpaper_logo_U')):
+        (ka, ks), (kpa, kps), (ea, es), (epa, eps) = tex(k, kt), pal(k, kp), tex(e, et), pal(e, ep)
+        if ks != es or kps != eps:
+            raise BuildError("The title screen's textures aren't the ones this build knows. Re-dump the cartridge.")
+        pic = k[ka:ka + ks]
+        if et == 'title_menu_E':
+            # (x, y, w, h) in the Japanese picture: (x, y) in the European one
+            menu = bytearray(ks)
+            for sx, sy, w, h, dx, dy in ((0, 0, 64, 40, 0, 0),         # VS
+                                         (64, 0, 64, 40, 0, 80),        # the mini-games: the Rec Room
+                                         (0, 40, 128, 40, 0, 40),       # ADVENTURE
+                                         (0, 80, 32, 32, 96, 0),        # the wrench
+                                         (32, 80, 48, 16, 80, 112)):    # the arrows
+                for y in range(h):
+                    menu[(dy + y) * 128 + dx:(dy + y) * 128 + dx + w] = pic[(sy + y) * 128 + sx:(sy + y) * 128 + sx + w]
+            pic = bytes(menu)
+        e[ea:ea + es] = pic
+        e[epa:epa + eps] = k[kpa:kpa + kps]
+    # the options screen: the same layout, but the European picture has 200
+    # colours, so the cartridge's colours past 200 become their nearest below
+    (ka, ks), (kpa, kps) = tex(k, f'title_option{u}'), pal(k, f'title_option{u}')
+    (ea, es), (epa, eps) = tex(e, 'title_option_EU'), pal(e, 'title_option_pl')
+    if ks != es or kps != 0x200 or eps != 0x190:
+        raise BuildError("The title screen's textures aren't the ones this build knows. Re-dump the cartridge.")
+    opal = bmd_colours(k, kpa, 256)
+    below = list(range(200)) + [nearest(opal[i], range(1, 200), opal) for i in range(200, 256)]
+    e[ea:ea + es] = bytes(below[v] for v in k[ka:ka + ks])
+    e[epa:epa + eps] = k[kpa:kpa + eps]
+    return lz77_wrap(bytes(e))
+
+
+def region_apply(files, assets, got, language, log):
+    """The Japanese or American files over the European English ones."""
+    spec, src = region_spec(language), got['files']
+    m = code_map(spec['moves'])
+    new = {eu: src[p] for p, eu in spec['files'].items()}
+    bank = recode_bank(src[spec['bank']], m) if spec['moves'] else src[spec['bank']]
+    for p in BANK_SLOTS:
+        new[p] = bank
+    c2d = src['ARCHIVE/c2d.narc']
+    new['ARCHIVE/cee.narc'] = narc_replace(files['ARCHIVE/cee.narc'],
+                                           {eu: narc_get(c2d, p) for p, eu in spec['members'].items()})
+    font, big = narc_get(c2d, spec['fonts'][0]), lz77(narc_get(c2d, spec['fonts'][1]))
+    if spec['moves']:
+        font, big = move_glyphs(font, m, small_tiles), move_glyphs(big, m, big_tiles)
+    new['ARCHIVE/c2d.narc'] = narc_replace(files['ARCHIVE/c2d.narc'], {EU_FONT: font, EU_BIG_FONT: lz10_wrap(big)})
+    new[EU_TEXBANK] = region_texbank(files[EU_TEXBANK], src[spec['texbank']], language)
+    widths = bytearray(512)
+    for c in range(256):
+        widths[m[c]], widths[256 + m[c]] = got['widths'][c], got['widths'][256 + c]
+    changed = replace_files(files, assets, new, LANGUAGES[language][0])
+    assets['langpack.bin'] = langpack(language, bytes(widths))
+    log(f'    {len(new)} files {LANGUAGES[language][0]}, {changed} entries in the file table updated')
+
+
+# --- the American or Japanese cartridge alone (Regions.cs) ------------------
+# Without a European dump, what extract() takes out of one is made out of the
+# American (ASME) or Japanese (ASMJ) cartridge: builder-files/region-ASME.tsv
+# (region-ASMJ.tsv), which region_kit.py makes from all three cartridges, says
+# where each piece of romdata.bin (the European layout) is in that cartridge's
+# program, the numbers the European layout has in place of the cartridge's
+# own (its pointers and file numbers), the European file system's names, and
+# which of the cartridge's files each European file is. What the cartridge has
+# nothing for (the four other languages' tables and pictures) is left empty,
+# as the game runs in the English slot; then region_apply makes the edition as
+# it does with the two dumps. Its lines, tab-separated:
+#
+#   code ASME | layout <sha> <len> | blob <sha> | leaves <sha> | ovt <sha>
+#   img <module> <len> <sha>       a module of the cartridge (arm9, ov000...), decompressed
+#   r <off> <len> <module> <from>  romdata.bin bytes, from the module
+#   w <off> <hex word> ...         romdata.bin words, the European numbers
+#   b <off> <hex>                  romdata.bin bytes, the European names
+#   D <first> <parent> <entry> ... a directory of the file name table, in order:
+#                                  f:<name> a file, d:<name>:<id> a directory
+#   F <path> <how>                 a file of it; <how> is = <path> (the cartridge's file),
+#                                  m <narc> <member> (a member of one of its archives),
+#                                  c <path> (the European file's copy), z <lz> <size> (empty),
+#                                  t <path> (the texture bank, then T and P lines)
+#   A <narc> | N <narc> <first> <parent> <entry> ... | M <narc> <member> <how>
+#                                  an archive, its names (as D) and its members (as F)
+#   T <path> <name> <size> <w> <h> <params> <from>   the texture bank's textures in
+#   P <path> <name> <size> <from>                    order, and palettes ('-': none)
+
+REGION_DUMPS = {'ASME': 'en-us', 'ASMJ': 'ja'}
+
+
+def region_modules(rb):
+    """{'arm9': bytes, 'ov000': bytes, ...}: the cartridge's program, decompressed."""
+    a9 = u32(rb, 0x20)
+    try:
+        out = {'arm9': expand_blz(rb[a9:a9 + u32(rb, 0x2C)])}
+    except ValueError as e:
+        raise BuildError(f"Could not read this dump's program data ({e}). Re-dump the cartridge.")
+    fat, table, size = u32(rb, 0x48), u32(rb, 0x50), u32(rb, 0x54)
+    for i in range(size // 32):
+        e = table + i * 32
+        ident, f, flags = u32(rb, e), u32(rb, e + 24), u32(rb, e + 28)
+        start, end = u32(rb, fat + f * 8), u32(rb, fat + f * 8 + 4)
+        if f >= u32(rb, 0x4C) // 8 or end < start or end > len(rb):
+            raise BuildError('This dump is damaged: an overlay runs past the end of the file. Re-dump the cartridge.')
+        try:
+            out[f'ov{ident:03d}'] = expand_blz(rb[start:end]) if flags & 0x1000000 else rb[start:end]
+        except ValueError as e:
+            raise BuildError(f"Could not read overlay {ident} of this dump ({e}). Re-dump the cartridge.")
+    return out
+
+
+def fnt_build(dirs):
+    """A file name table from its directories [(first id, parent, [(kind, name, id)])]."""
+    subs = []
+    for _, _, ents in dirs:
+        b = bytearray()
+        for k, name, sub in ents:
+            nb = name.encode('ascii')
+            b += bytes([len(nb) | (0x80 if k == 'd' else 0)]) + nb + (struct.pack('<H', sub) if k == 'd' else b'')
+        subs.append(bytes(b) + b'\0')
+    out, off = bytearray(), len(dirs) * 8
+    for (first, parent, _), s in zip(dirs, subs):
+        out += struct.pack('<IHH', off, first, parent)
+        off += len(s)
+    return bytes(out) + b''.join(subs)
+
+
+def fnt_walk(dirs):
+    """[(file id, path)] of a file name table's files."""
+    out, queue = [], [(0, '')]
+    while queue:
+        d, base = queue.pop(0)
+        fid = dirs[d][0]
+        for k, name, sub in dirs[d][2]:
+            if k == 'd':
+                queue.append((sub & 0xFFF, base + name + '/'))
+            else:
+                out.append((fid, base + name))
+                fid += 1
+    return out
+
+
+def narc_build(dirs, data):
+    """A NARC archive of the members data (by index) named by dirs (as fnt_build)."""
+    btaf, gmif = bytearray(b'BTAF' + struct.pack('<IHH', 12 + 8 * len(data), len(data), 0)), bytearray()
+    for b in data:
+        btaf += struct.pack('<II', len(gmif), len(gmif) + len(b))
+        gmif += b + b'\xff' * (-len(b) & 3)
+    names = fnt_build(dirs)
+    names += b'\xff' * (-len(names) & 3)
+    body = bytes(btaf) + b'BTNF' + struct.pack('<I', 8 + len(names)) + names + \
+        b'GMIF' + struct.pack('<I', 8 + len(gmif)) + bytes(gmif)
+    return b'NARC\xfe\xff\x00\x01' + struct.pack('<IHH', 16 + len(body), 16, 3) + body
+
+
+def texbank_build(src, textures, palettes):
+    """A texture bank (a BMD of one material) with the textures [(name, w, h,
+    params, data)] and palettes [(name, data)] in place of src's, laid out as
+    the cartridge lays its out: the tables and their names, the material, then
+    the textures' data and the palettes'."""
+    b = lz77(src)
+    mat_count, mat_at = u32(b, 0x24), u32(b, 0x28)
+    head = bytearray(b[:0xE0])   # the header, the bone and the display list
+    out = bytearray(head)
+    tex_at = len(out)
+    out += bytes(20 * len(textures))
+    names = []
+    for t in textures:
+        names.append(len(out))
+        out += t[0].encode('ascii') + b'\0'
+    out += bytes(-len(out) & 3)
+    pal_at = len(out)
+    out += bytes(16 * len(palettes))
+    pnames = []
+    for p in palettes:
+        pnames.append(len(out))
+        out += p[0].encode('ascii') + b'\0'
+    out += bytes(-len(out) & 3)
+    mats = len(out)
+    mat = bytearray(b[mat_at:mat_at + 48 * mat_count])
+    out += mat
+    for i in range(mat_count):
+        n = u32(b, mat_at + i * 48)
+        struct.pack_into('<I', out, mats + i * 48, len(out))
+        out += b[n:b.index(b'\0', n) + 1]
+    out += bytes(-len(out) & 3)
+    data_at = len(out)
+    for i, (name, w, h, params, data) in enumerate(textures):
+        struct.pack_into('<IIIHHI', out, tex_at + i * 20, names[i], len(out), len(data), w, h, params)
+        out += data
+    for i, (name, data) in enumerate(palettes):
+        struct.pack_into('<IIIi', out, pal_at + i * 16, pnames[i], len(out), len(data), -1)
+        out += data
+    struct.pack_into('<IIIIII', out, 0x14, len(textures), tex_at, len(palettes), pal_at, mat_count, mats)
+    struct.pack_into('<I', out, 0x38, data_at)
+    return lz77_wrap(bytes(out))
+
+
+def texbank_parts(bmd):
+    """({name: (w, h, params, data)}, {name: data}) of a texture bank."""
+    b = lz77(bmd)
+    tex, pal = {}, {}
+    for i in range(u32(b, 0x14)):
+        e = u32(b, 0x18) + i * 20
+        n, at, size, w, h, params = struct.unpack_from('<IIIHHI', b, e)
+        tex[b[n:b.index(b'\0', n)].decode('ascii')] = (w, h, params, b[at:at + size])
+    for i in range(u32(b, 0x1C)):
+        e = u32(b, 0x20) + i * 16
+        n, at, size = struct.unpack_from('<III', b, e)
+        pal[b[n:b.index(b'\0', n)].decode('ascii')] = b[at:at + size]
+    return tex, pal
+
+
+def region_kit(code):
+    """The kit's lines for a cartridge, split into their fields."""
+    with open(kit(f'region-{code}.tsv'), encoding='utf-8') as f:
+        return [line.rstrip('\n').split('\t') for line in f if line.strip() and not line.startswith('#')]
+
+
+def dirs_of(fields):
+    ents = []
+    for e in fields:
+        k, rest = e.split(':', 1)
+        if k == 'd':
+            name, sub = rest.rsplit(':', 1)
+            ents.append(('d', name, int(sub)))
+        else:
+            ents.append(('f', rest, None))
+    return ents
+
+
+def standalone_extract(rb, recipe_path, manifest_path, log, progress):
+    """(files, assets) as extract() gives them, out of the American or Japanese
+    cartridge alone (above)."""
+    code = rb[0x0C:0x10].decode('ascii', 'replace')
+    who = REGION[code]
+    log(f'Super Mario 64 DS ({code}, {"Japan" if code == "ASMJ" else "USA"}), {round(len(rb) / 1048576)} MB')
+    lines = region_kit(code)
+    head = {f[0]: f[1:] for f in lines if f[0] in ('code', 'layout', 'blob', 'leaves', 'ovt')}
+    damaged = BuildError(f"This builder's region-{code}.tsv is damaged. Download the builder again.")
+    if head.get('code') != [code] or 'layout' not in head or 'blob' not in head:
+        raise damaged
+    progress(5, 'Decompressing the program')
+    mods = region_modules(rb)
+    for f in lines:
+        if f[0] == 'img' and (f[1] not in mods or len(mods[f[1]]) != int(f[2]) or sha256(mods[f[1]]) != f[3]):
+            raise not_that_cartridge(REGION_DUMPS[code])
+
+    # romdata.bin
+    progress(20, 'Rebuilding romdata.bin')
+    total = int(head['layout'][1])
+    blob = bytearray(total)
+    try:
+        for f in lines:
+            if f[0] == 'r':
+                off, n, frm = int(f[1]), int(f[2]), int(f[4])
+                blob[off:off + n] = mods[f[3]][frm:frm + n]
+            elif f[0] == 'w':
+                off = int(f[1])
+                for i, w in enumerate(f[2].split()):
+                    struct.pack_into('<I', blob, off + i * 4, int(w, 16))
+            elif f[0] == 'b':
+                raw = bytes.fromhex(f[2])
+                blob[int(f[1]):int(f[1]) + len(raw)] = raw
+    except (ValueError, KeyError, IndexError, struct.error):
+        raise damaged
+    if len(blob) != total or sha256(blob) != head['blob'][0]:
+        raise not_that_cartridge(REGION_DUMPS[code])
+    log(f'    romdata.bin made ({total} bytes, checksum OK)')
+    with open(manifest_path, encoding='utf-8') as f:
+        man = f.read().splitlines()
+    m = re.match(r'^# romdata-manifest v1 ([0-9a-f]{64}) (\d+)$', man[0]) if man else None
+    if not m or m.group(1) != head['layout'][0] or int(m.group(2)) != total:
+        raise BuildError(f"This builder's region-{code}.tsv belongs to another build of the game. "
+                         'Download the builder again.')
+    # the manifest of this blob, its layout the European one's (game/language.cpp)
+    out = [f'# romdata-manifest v1 {sha256(blob)} {total} layout {m.group(1)}']
+    for line in man[1:]:
+        f = line.split('\t')
+        if f[0] == 'part' and len(f) == 5:
+            f[4] = sha256(blob[int(f[2]):int(f[2]) + int(f[3])])
+        elif f[0] == 'sym' and len(f) == 6:
+            f[5] = sha256(blob[int(f[3]):int(f[3]) + int(f[4])])
+        out.append('\t'.join(f))
+    assets = {'romdata.bin': bytes(blob), 'romdata.manifest': ('\n'.join(out) + '\n').encode()}
+
+    # the cartridge's files
+    progress(40, 'Reading the file tables')
+    fnt_off, fnt_size, fat_off, fat_size, ovt_off, ovt_size = struct.unpack_from('<6I', rb, 0x40)
+    have = {p: b for i, p in fnt_walk(fnt_dirs(rb)) for b in [rb_file(rb, i)]}
+    narcs = {}
+
+    def member(narc, name):
+        if narc not in narcs:
+            names, _ = narc_members(have[narc])
+            narcs[narc] = (names, narc_files(have[narc]))
+        names, data = narcs[narc]
+        return data[names[name]] if name in names else None
+    used = hashlib.sha256()
+    for f in lines:
+        if f[0] in ('F', 'M'):
+            how = f[2:] if f[0] == 'F' else f[3:]
+            if how[0] == '=' or how[0] == 't':
+                b = have.get(how[1])
+            elif how[0] == 'm':
+                b = member(how[1], how[2]) if how[1] in have else None
+            else:
+                continue
+            if b is None:
+                raise BuildError(f"The {who} dump has no {how[-1]}. Re-dump the cartridge.")
+            used.update(hashlib.sha256(b).digest())
+    if used.hexdigest() != head['leaves'][0] or sha256(rb[ovt_off:ovt_off + ovt_size]) != head['ovt'][0]:
+        raise not_that_cartridge(REGION_DUMPS[code])
+
+    # the European file system
+    progress(60, 'Making the European file system')
+    dirs = [(int(f[1]), int(f[2]), dirs_of(f[3:])) for f in lines if f[0] == 'D']
+    adirs, how_f, how_m, tex, pal = {}, {}, {}, {}, {}
+    for f in lines:
+        if f[0] == 'N':
+            adirs.setdefault(f[1], []).append((int(f[2]), int(f[3]), dirs_of(f[4:])))
+        elif f[0] == 'F':
+            how_f[f[1]] = f[2:]
+        elif f[0] == 'M':
+            how_m[(f[1], f[2])] = f[3:]
+        elif f[0] == 'T':
+            tex.setdefault(f[1], []).append(f[2:])
+        elif f[0] == 'P':
+            pal.setdefault(f[1], []).append(f[2:])
+    done = {}
+
+    def make(key, how):
+        if key in done:
+            return done[key]
+        k = how[0]
+        if k == '=':
+            b = have[how[1]]
+        elif k == 'm':
+            b = member(how[1], how[2])
+        elif k == 'c':
+            b = make(how[1], how_f[how[1]]) if ':' not in how[1] else \
+                make(tuple(how[1].split(':', 1)), how_m[tuple(how[1].split(':', 1))])
+        elif k == 'z':
+            raw = bytes(int(how[2]))
+            b = {'lz77': lz77_wrap, 'lz10': lz10_wrap, 'raw': bytes}[how[1]](raw)
+        elif k == 't':
+            st, sp = texbank_parts(have[how[1]])
+            t = [(n, int(w), int(h), int(p, 16), st[s][3] if s != '-' else bytes(int(size)))
+                 for n, size, w, h, p, s in tex[key]]
+            p = [(n, pal_of(sp, s, int(size))) for n, size, s in pal[key]]
+            b = texbank_build(have[how[1]], t, p)
+        elif k == 'A':
+            fl = fnt_walk(adirs[key])
+            data = [None] * len(fl)
+            for i, (fid, name) in enumerate(fl):
+                data[fid - adirs[key][0][0]] = make((key, name), how_m[(key, name)])
+            b = narc_build(adirs[key], data)
+        else:
+            raise damaged
+        done[key] = b
+        return b
+    files = {}
+    eu = fnt_walk(dirs)
+    for fid, p in eu:
+        if p not in how_f:
+            raise damaged
+        files[p] = make(p, how_f[p])
+    log(f'    {len(files)} files, {round(sum(len(b) for b in files.values()) / 1048576, 1)} MB')
+
+    # the tables: the overlays' entries as the cartridge's, then the files
+    progress(80, 'Writing the file tables')
+    fnt = fnt_build(dirs)
+    first = dirs[0][0]
+    count = first + len(eu)
+    fat = bytearray(count * 8)
+    fat[:first * 8] = rb[fat_off:fat_off + first * 8]
+    new_fat = (fnt_off + len(fnt) + 0x1FF) & ~0x1FF
+    at = (new_fat + count * 8 + 0x1FF) & ~0x1FF
+    for fid, p in sorted(eu):
+        struct.pack_into('<II', fat, fid * 8, at, at + len(files[p]))
+        at = (at + len(files[p]) + 0x1FF) & ~0x1FF
+    if at > 0x8000000:
+        raise BuildError(f"The {who} files don't fit the cartridge's address space.")
+    assets['nitrofs_fnt.bin'], assets['nitrofs_fat.bin'] = fnt, bytes(fat)
+    assets['nitrofs_ovt9.bin'] = rb[ovt_off:ovt_off + ovt_size]
+    assets['nitrofs.tsv'] = (f'key\tvalue\nfnt_offset\t{fnt_off}\nfnt_size\t{len(fnt)}\nfat_offset\t{new_fat}\n'
+                             f'fat_size\t{len(fat)}\novt9_offset\t{ovt_off}\novt9_size\t{ovt_size}\n'
+                             f'ovt7_offset\t0\novt7_size\t0\n').encode()
+    file_rows = ['file_id\thex_id\tpath\tkind\tsize\n']
+    for fid, p in sorted(eu):
+        file_rows.append(f'{fid}\t0x{fid:04x}\t{p}\t{kind(p)}\t{len(files[p])}\n')
+    # the handles: overlay 0's table (romdata.bin's first part) and its names
+    ov0 = eu_module(blob, recipe_path, 'ov000')
+    id_by_path = {p.lower(): fid for fid, p in eu}
+    path_by_id = dict(eu)
+    handle_rows = ['handle\thex_handle\tfile_id\thex_file_id\tpath\tkind\tsize\n']
+    for h in range(HANDLE_COUNT):
+        so = u32(ov0, HANDLE_TABLE_ADDRESS - OV0_ADDRESS + h * 4) - OV0_ADDRESS
+        asset = ov0[so:ov0.index(b'\0', so)].decode('ascii', 'replace')
+        if asset.lower() not in id_by_path:
+            raise damaged
+        i = id_by_path[asset.lower()]
+        handle_rows.append(f'{h}\t0x{h:04x}\t{i}\t0x{i:04x}\t{asset}\t{kind(asset)}\t{len(files[path_by_id[i]])}\n')
+    assets['files.tsv'], assets['handles.tsv'] = ''.join(file_rows).encode(), ''.join(handle_rows).encode()
+    log(f'    {len(eu)} files and {HANDLE_COUNT} handles catalogued')
+    progress(100, 'Done')
+    return files, assets
+
+
+OV0_ADDRESS = 0x020AA420   # overlay 0 in the European program
+
+
+def pal_of(pals, name, size):
+    return pals[name][:size] if name != '-' else bytes(size)
+
+
+def eu_module(blob, recipe_path, module):
+    """The European module's bytes romdata.bin has (the rest zero), as one image."""
+    with open(recipe_path, encoding='utf-8') as f:
+        rows = [line.split('\t') for line in f.read().splitlines() if line and not line.startswith('#')]
+    rows = [(int(r[0]), int(r[1]), int(r[3])) for r in rows if r[2].lower() == module]
+    img = bytearray(max(s + n for _, n, s in rows))
+    for off, n, s in rows:
+        img[s:s + n] = blob[off:off + n]
+    return bytes(img)
+
+
+def fnt_dirs(rb):
+    """The cartridge's file name table, as fnt_build's directories."""
+    fnt_off, fnt_size = u32(rb, 0x40), u32(rb, 0x44)
+    fnt = rb[fnt_off:fnt_off + fnt_size]
+    dirs = []
+    for d in range(u16(fnt, 6)):
+        off, first, parent = struct.unpack_from('<IHH', fnt, d * 8)
+        ents, o = [], off
+        while fnt[o]:
+            t = fnt[o]
+            name = fnt[o + 1:o + 1 + (t & 0x7F)].decode('ascii', 'replace')
+            o += 1 + (t & 0x7F)
+            if t & 0x80:
+                ents.append(('d', name, u16(fnt, o)))
+                o += 2
+            else:
+                ents.append(('f', name, None))
+        dirs.append((first, parent, ents))
+    return dirs
+
+
+def rb_file(rb, fid):
+    fat = u32(rb, 0x48)
+    start, end = u32(rb, fat + fid * 8), u32(rb, fat + fid * 8 + 4)
+    if end < start or end > len(rb):
+        raise BuildError('This dump is damaged: its file table points past the end of the file. Re-dump the cartridge.')
+    return rb[start:end]
+
+
 def pack(files):
     """files.pak (Builder.cs Pack): S3PK, the files in path order with their
     folders compared case-blind, each 4-byte aligned. files.txt is left out."""
@@ -509,19 +1554,30 @@ def overlay(rb, ident):
     return None
 
 
+LOGO_PALETTE = '8d3a76050a99c1b2007249164cb4047450ea607d5a70a01f90017a2cedf4cc2a'
+LOGO_SCREEN = 'eca1045a4f516efcfa532f0ed85bf97a2d9bef295db19f51d97825b35780b4fd'
+LOGOS = {   # the cartridge: overlay 7's palette, screen and characters (offset, size, sha256)
+    'ASMP': ((0x2BF08, 556, LOGO_PALETTE), (0x30068, 6420, LOGO_SCREEN),
+             (0x3D08C, 33392, '16eac000c3f8de4135ccd1b78d465aa52bb350fba1323162f4ddf20f2f1bbc83')),
+    'ASME': ((0x2BA48, 556, LOGO_PALETTE), (0x2FB80, 6420, LOGO_SCREEN),
+             (0x3CBA4, 33392, 'f168e397924567e3445561dad3f178b96608ec27ef7fae893da1bb6cf3335ad5')),
+    'ASMJ': ((0x2BA08, 556, 'f09e6584545ea7ed02a6a5df60ce7a14a201a9beda1f59fa89367b0a316870c1'), (0x2F764, 6420, LOGO_SCREEN),
+             (0x3C788, 33388, 'd2eda4d702a93acfb549c5db6514c76271347b470a60468700ed9ab3d72593c0')),
+}
+
+
 def title_logo(rb):
     """The title screen's logo from overlay 7 (NCCL/NCSC/NCCG blocks, each checked
-    against the European ROM's hash): (width, height, RGBA rows), or None."""
+    against the retail cartridge's hash, LOGOS): (width, height, RGBA rows), or None."""
+    want = LOGOS.get(rb[0x0C:0x10].decode('ascii', 'replace'))
     ov = overlay(rb, 7)
-    if ov is None:
+    if ov is None or want is None:
         return None
 
-    def block(at, size, want):
+    def block(at, size, sha):
         b = ov[at:at + size]
-        return b if len(b) == size and sha256(b) == want else None
-    pal = block(0x2bf08, 556, '8d3a76050a99c1b2007249164cb4047450ea607d5a70a01f90017a2cedf4cc2a')
-    scr = block(0x30068, 6420, 'eca1045a4f516efcfa532f0ed85bf97a2d9bef295db19f51d97825b35780b4fd')
-    chr_ = block(0x3d08c, 33392, '16eac000c3f8de4135ccd1b78d465aa52bb350fba1323162f4ddf20f2f1bbc83')
+        return b if len(b) == size and sha256(b) == sha else None
+    pal, scr, chr_ = (block(*w) for w in want)
     if pal is None or scr is None or chr_ is None:
         return None
     colours = [(0, 0, 0, 0)]
@@ -1318,13 +2374,18 @@ def tiles(px, w, h):
     return struct.pack(f'<{w * h}H', *out)
 
 
-def smdh(icon, short, long_, publisher):
+def smdh(icon, short, long_, publisher, slots=None):
     """bannertool makesmdh: every language slot the same titles, region free,
-    visible + 3D + usage record, the 48x48 icon and a 24x24 of its 2x2 averages."""
+    visible + 3D + usage record, the 48x48 icon and a 24x24 of its 2x2 averages.
+    slots: {language slot: (short, long)} where one differs (7 is Korean)."""
     def text(s, n):
         b = s.encode('utf-16-le')[:n * 2]
         return b + bytes(n * 2 - len(b))
     title = text(short, 0x40) + text(long_, 0x80) + text(publisher, 0x40)
+    if slots:
+        return b'SMDH' + struct.pack('<HH', 0, 0) + b''.join(
+            text(slots[i][0], 0x40) + text(slots[i][1], 0x80) + text(publisher, 0x40) if i in slots else title
+            for i in range(16)) + smdh(icon, short, long_, publisher)[8 + 0x200 * 16:]
     small = []
     for y in range(0, 48, 2):
         for x in range(0, 48, 2):
@@ -1498,7 +2559,9 @@ def makerom():
 
 # --- the build -------------------------------------------------------------
 
-def build(rom, output, options, log, progress, keep=False, tool=None):
+def build(rom, output, options, log, progress, keep=False, tool=None, second=None, language=None):
+    """second: a second dump (ASMJ, ASMK or ASME), for that cartridge's edition;
+    language: the edition's language (LANGUAGES), the second dump's if None."""
     rom, output = os.path.abspath(rom), os.path.abspath(output)
     if not os.path.isfile(os.path.join(KIT, 'LABEL.txt')):
         kit('LABEL.txt')
@@ -1512,23 +2575,87 @@ def build(rom, output, options, log, progress, keep=False, tool=None):
     code = rb[12:16].decode('ascii', 'replace')
     if not code.startswith('ASM'):
         raise BuildError(f"This is not a Super Mario 64 DS dump (its game code is {code.replace(chr(0), ' ').strip()}).")
-    if code != 'ASMP':
+    # the American or Japanese cartridge alone: its own edition (standalone_extract)
+    alone = code in REGION_DUMPS and not second
+    if alone:
+        if language not in (None, REGION_DUMPS[code]):
+            raise BuildError(f'The {REGION[code]} cartridge alone makes the {LANGUAGES[REGION_DUMPS[code]][0]} '
+                             f'edition. For the {LANGUAGES[language][0]} one, give a European dump (ASMP) first '
+                             f'and the {REGION[code]} one second.' if language in LANGUAGES and
+                             LANGUAGES[language][2] == code else
+                             f'The {REGION[code]} cartridge alone makes the {LANGUAGES[REGION_DUMPS[code]][0]} '
+                             f'edition; the {LANGUAGES.get(language, (language,))[0]} game is made from a European '
+                             'dump (ASMP).')
+        language = REGION_DUMPS[code]
+    elif code in DUMP_LANGUAGE:
+        name = LANGUAGES[DUMP_LANGUAGE[code]][0]
+        raise BuildError(f'This is the {REGION[code]} Super Mario 64 DS ({code}). The {name} edition of {TITLE} is '
+                         'built from it together with a dump of the European cartridge (ASMP), which has the game the '
+                         f'port runs: give the European dump first and the {REGION[code]} one second.')
+    if code != 'ASMP' and not alone:
         raise BuildError(f'This is Super Mario 64 DS, but not the European version (game code {code}). {TITLE} is '
                          "built from the European cartridge (ASMP); its data does not come out of another region's.")
+    sb = None
+    if second:
+        try:
+            with open(os.path.abspath(second), 'rb') as f:
+                sb = f.read()
+        except OSError as e:
+            raise BuildError(f'The second dump could not be read: {e.strerror}.')
+        have = sb[12:16].decode('ascii', 'replace') if len(sb) >= 16 else ''
+        if have not in DUMP_LANGUAGE:
+            raise BuildError(f'The second dump is not the Japanese (ASMJ), Korean (ASMK) or American (ASME) Super '
+                             f"Mario 64 DS (its game code is {re.sub('[^ -~]', '.', have) or 'missing'}).")
+        if language is None:
+            language = DUMP_LANGUAGE[have]
+    if language is not None and language not in LANGUAGES:
+        raise BuildError(f"There is no language '{language}'. The languages are: {', '.join(LANGUAGES)}.")
+    if language is not None and not alone:
+        need = LANGUAGES[language][2]
+        if need and (sb is None or sb[12:16] != need.encode()):
+            raise BuildError(f'The {LANGUAGES[language][0]} edition is built from the European dump and a dump of '
+                             f'the {REGION[need]} cartridge ({need}): give that one second.')
+        if not need and sb is not None:
+            raise BuildError(f'The {LANGUAGES[language][0]} game comes out of the European dump alone; the second '
+                             "dump would change it, so leave it out (or don't give --language).")
     tool = tool or makerom()
     tmp = tempfile.mkdtemp(prefix='SM64DSEnhancedBuilder-')
     try:
         progress(1, 'Starting...')
         log('Extracting the game data from your dump...')
-        files, assets = extract(rb, kit('romdata.recipe.tsv'), kit('romdata.manifest'), lambda s: log('  ' + s),
-                                lambda pct, what: progress(2 + pct * 68 // 100, what))
+        sub = lambda s: log('  ' + s)
+        if alone:
+            log(f'Making the European game out of your {REGION[code]} dump (it has no European dump beside it)...')
+            files, assets = standalone_extract(rb, kit('romdata.recipe.tsv'), kit('romdata.manifest'), sub,
+                                               lambda pct, what: progress(2 + pct * 68 // 100, what))
+            sb = rb
+        else:
+            files, assets = extract(rb, kit('romdata.recipe.tsv'), kit('romdata.manifest'), sub,
+                                    lambda pct, what: progress(2 + pct * 68 // 100, what))
+        # the HOME Menu banner is made from the European files (its recipe is theirs)
+        dsmt = {p[len('data/DSMT/'):]: b for p, b in files.items() if p.startswith('data/DSMT/')}
+        if language == 'ko':
+            progress(71, 'Reading the Korean text...')
+            log('Extracting the Korean text from your Korean dump...')
+            korean_apply(files, assets, korean_extract(sb, sub), sub)
+        elif language in ('ja', 'en-us'):
+            name = LANGUAGES[language][0]
+            progress(71, f'Reading the {name} text...')
+            log(f'Extracting the {name} text from your {REGION[LANGUAGES[language][2]]} dump...')
+            region_apply(files, assets, region_extract(sb, language, sub), language, sub)
+        elif language is not None:
+            assets['langpack.bin'] = langpack(language)
+            log(f'The game runs in {LANGUAGES[language][0]}.')
 
         progress(72, 'Packing the game files...')
         romfs = os.path.join(tmp, 'romfs')
         adir = os.path.join(romfs, 'build', 'assets')
         os.makedirs(adir)
-        for name in ('files.tsv', 'handles.tsv', 'nitrofs.tsv', 'nitrofs_fat.bin', 'nitrofs_fnt.bin',
-                     'nitrofs_ovt9.bin', 'romdata.bin', 'romdata.manifest'):
+        names = ('files.tsv', 'handles.tsv', 'nitrofs.tsv', 'nitrofs_fat.bin', 'nitrofs_fnt.bin',
+                 'nitrofs_ovt9.bin', 'romdata.bin', 'romdata.manifest')
+        if language:
+            names += ('langpack.bin',) + (('korean.bin',) if language == 'ko' else ())
+        for name in names:
             if name not in assets:
                 raise BuildError(f'The extraction did not produce {name}. Try again; if it happens again, the dump '
                                  'may be damaged.')
@@ -1557,7 +2684,6 @@ def build(rom, output, options, log, progress, keep=False, tool=None):
             template = f.read()
         with open(kit('face.recipe'), encoding='utf-8') as f:
             recipe = f.read().splitlines()
-        dsmt = {p[len('data/DSMT/'):]: b for p, b in files.items() if p.startswith('data/DSMT/')}
         model = face_banner(dsmt, template, recipe, logo, log)
         if model is None:
             raise BuildError("The dump's files aren't the ones the HOME Menu banner is made from.")
@@ -1571,7 +2697,7 @@ def build(rom, output, options, log, progress, keep=False, tool=None):
         with open(os.path.join(art, 'banner.cgfx'), 'wb') as f:
             f.write(model)
         with open(os.path.join(art, 'icon.smdh'), 'wb') as f:
-            f.write(smdh(icon, TITLE, TITLE, AUTHOR))
+            f.write(smdh(icon, edition_title(language), edition_title(language), AUTHOR, edition_slots(language)))
         with open(os.path.join(art, 'banner.bnr'), 'wb') as f:
             f.write(bnr(model, wav))
 
@@ -1679,11 +2805,24 @@ def self_test(write):
     return 1 if bad else 0
 
 
+def dump_code(path):
+    """A dump's game code, or '' if it can't be read."""
+    try:
+        with open(path, 'rb') as f:
+            return f.read(0x10)[0x0C:0x10].decode('ascii', 'replace')
+    except OSError:
+        return ''
+
+
 def main():
     if '--self-test' in sys.argv[1:] or '--self-test-write' in sys.argv[1:]:
         return self_test('--self-test-write' in sys.argv[1:])
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('rom', nargs='?', help='your Super Mario 64 DS dump (.nds, the European cartridge)')
+    ap.add_argument('second', nargs='?', help='for the Japanese, Korean or American English edition: your dump of '
+                    'that cartridge too')
+    ap.add_argument('--language', choices=list(LANGUAGES),
+                    help="the game's language (default: English, or the second dump's)")
     ap.add_argument('-o', '--out', help='where the .cia goes (default: next to the dump)')
     ap.add_argument('--option', action='append', default=[], metavar='KEY=VALUE')
     ap.add_argument('--keep', action='store_true', help='keep the work folder (its path is printed)')
@@ -1702,12 +2841,30 @@ def main():
         if not rom:
             return 2
         rom = os.path.expanduser(rom.replace('\\ ', ' '))
+    second = a.second
+    # the two dumps in either order
+    if second and dump_code(rom) in DUMP_LANGUAGE and dump_code(second) == 'ASMP':
+        rom, second = second, rom
+    # the American or Japanese cartridge alone makes its own edition; the
+    # Korean one needs the European dump beside it
+    if not second and dump_code(rom) in DUMP_LANGUAGE and dump_code(rom) not in REGION_DUMPS:
+        code = dump_code(rom)
+        print(f'That is the {REGION[code]} cartridge. The {LANGUAGES[DUMP_LANGUAGE[code]][0]} edition needs your '
+              'European dump (.nds) too: drag it in, then press Enter:')
+        try:
+            other = input('> ').strip().strip('"').strip("'")
+        except EOFError:
+            other = ''
+        if not other:
+            return 2
+        second, rom = rom, os.path.expanduser(other.replace('\\ ', ' '))
+    language = a.language or (DUMP_LANGUAGE.get(dump_code(second)) if second else REGION_DUMPS.get(dump_code(rom)))
     options = Options()
     for line in a.option:
         if not options.set(line):
             print(f'Not a setting: {line}', file=sys.stderr)
             return 2
-    out = a.out or os.path.join(os.path.dirname(os.path.abspath(rom)), TITLE + '.cia')
+    out = a.out or os.path.join(os.path.dirname(os.path.abspath(rom)), edition_title(language) + '.cia')
     logf = open(a.log, 'w', encoding='utf-8') if a.log else None
     clock = time.time()
 
@@ -1720,7 +2877,7 @@ def main():
         if what:
             log(f'[{pct}%] {time.time() - clock:.1f} s  {what}')
     try:
-        build(rom, out, options, log, progress, a.keep, a.makerom)
+        build(rom, out, options, log, progress, a.keep, a.makerom, second, a.language)
         print('Copy the .cia to your SD card and install it with FBI.')
         return 0
     except BuildError as e:

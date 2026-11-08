@@ -73,7 +73,7 @@ namespace Sm64dsEnhanced
 
         static int Headless(string[] args)
         {
-            string rom = null, output = null;
+            string rom = null, output = null, second = null, language = null;
             bool keep = false;
             var options = new BuildOptions();
             for (int i = 0; i < args.Length; i++)
@@ -81,6 +81,9 @@ namespace Sm64dsEnhanced
                 if (args[i] == "--keep") keep = true;   // leave the work folder (its path is logged)
                 else if (args[i] == "--rom" && i + 1 < args.Length) rom = args[++i];
                 else if (args[i] == "--out" && i + 1 < args.Length) output = args[++i];
+                // a second dump (ASMJ, ASMK, ASME), for that cartridge's edition (--korean: the older name)
+                else if ((args[i] == "--second" || args[i] == "--korean") && i + 1 < args.Length) second = args[++i];
+                else if (args[i] == "--language" && i + 1 < args.Length) language = args[++i];   // Languages.Codes
                 else if (args[i] == "--option" && i + 1 < args.Length && !options.Set(args[++i])) return 2;
             }
             if (rom == null || output == null) return 2;
@@ -98,6 +101,8 @@ namespace Sm64dsEnhanced
                             line(string.Format("[{0}%] {1:0.0} s  {2}", pct, clock.Elapsed.TotalSeconds, what));
                     });
                     build.Keep = keep;
+                    build.Second = second;
+                    build.Language = language;
                     build.Options = options;
                     build.Run();
                     return 0;
@@ -802,6 +807,7 @@ namespace Sm64dsEnhanced
         RomTile tile;
         FlatButton buildButton, showButton, settingsButton;
         string built;
+        string second;   // a second dump (ASMJ, ASMK, ASME), for its edition (with tile.Path the European one)
         readonly BuildOptions options = BuildOptions.Load();
         readonly string version;
         readonly Bitmap sky;
@@ -1004,9 +1010,42 @@ namespace Sm64dsEnhanced
 
         void SetRom(string path)
         {
+            // the Japanese, Korean or American cartridge: that edition, built from
+            // it and a European dump (the one already chosen, or for the Korean
+            // one asked for now); the American and Japanese ones without a
+            // European dump chosen are built alone (Regions.cs)
+            string edition = File.Exists(path) ? Languages.OfDump(Korean.Code(path)) : null;
+            bool euChosen = tile.Path != null && Korean.Code(tile.Path) == "ASMP";
+            if (edition != null && Regions.Edition(Korean.Code(path)) != null && !euChosen) edition = null;
+            if (edition != null)
+            {
+                string eu = tile.Path != null && Korean.Code(tile.Path) == "ASMP" ? tile.Path : null;
+                if (eu == null)
+                {
+                    MessageBox.Show(this, "That is the " + Languages.Region(Languages.Dump(edition)) +
+                                    " Super Mario 64 DS. The " + Languages.Name(edition) + " edition is made from " +
+                                    "it together with your dump of the European cartridge (ASMP), which has the " +
+                                    "game the port runs. Choose that one next.", Text, MessageBoxButtons.OK,
+                                    MessageBoxIcon.Information);
+                    using (var d = new OpenFileDialog())
+                    {
+                        d.Title = "Your European Super Mario 64 DS dump";
+                        d.Filter = "Nintendo DS ROM (*.nds)|*.nds|All files (*.*)|*.*";
+                        if (d.ShowDialog(this) != DialogResult.OK) return;
+                        eu = d.FileName;
+                    }
+                }
+                second = path;
+                path = eu;
+            }
+            else
+            {
+                second = null;
+            }
             Bitmap icon = null;
             try { if (File.Exists(path)) icon = Art.DsIcon(path); } catch (Exception) { }
             tile.Path = File.Exists(path) ? path : null;
+            tile.Ready = ReadyLine();
             tile.Icon = icon;
             tile.Progress = -1;
             tile.Status = null;
@@ -1028,7 +1067,12 @@ namespace Sm64dsEnhanced
 
         string ReadyLine()
         {
-            return "Ready for " + (options.Old ? "an Old 3DS" : "a New 3DS") + ". The .cia will be saved next to it.";
+            string alone = tile != null && tile.Path != null && second == null ? Regions.Edition(Korean.Code(tile.Path)) : null;
+            return "Ready for " + (options.Old ? "an Old 3DS" : "a New 3DS") +
+                   (second != null ? ", the " + Languages.Name(Languages.OfDump(Korean.Code(second))) +
+                                     " edition (with " + System.IO.Path.GetFileName(second) + ")" :
+                    alone != null ? ", the " + Languages.Name(alone) + " edition" : "") +
+                   ". The .cia will be saved next to it.";
         }
 
         // The settings dialog; a change after a build brings Build back, so the
@@ -1060,22 +1104,25 @@ namespace Sm64dsEnhanced
         {
             var rom = tile.Path;
             if (rom == null || !File.Exists(rom)) return;
+            var ko = second;
             var output = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(rom)),
-                                                Program.Title + ".cia");
+                                                Languages.Title(ko != null ? Languages.OfDump(Korean.Code(ko)) :
+                                                                Regions.Edition(Korean.Code(rom))) + ".cia");
             SetBusy(true);
             lines.Length = 0;
             var chosen = options.Copy();
-            var worker = new Thread(delegate () { RunBuild(rom, output, chosen); });
+            var worker = new Thread(delegate () { RunBuild(rom, ko, output, chosen); });
             worker.IsBackground = true;
             worker.Start();
         }
 
-        void RunBuild(string rom, string output, BuildOptions chosen)
+        void RunBuild(string rom, string ko, string output, BuildOptions chosen)
         {
             string error = null;
             try
             {
                 var build = new Build(rom, output, Log, Progress);
+                build.Second = ko;
                 build.Options = chosen;
                 build.Run();
             }
@@ -1190,6 +1237,9 @@ namespace Sm64dsEnhanced
         readonly Action<int, string> progress;
         public bool Keep;
         public BuildOptions Options = new BuildOptions();
+        public string Second;     // a second dump (ASMJ, ASMK or ASME), for that cartridge's edition
+        public string Language;   // the edition's language (Languages.Codes); the second dump's if null
+        bool alone;               // the American or Japanese dump alone (Regions.cs)
 
         public Build(string rom, string output, Action<string> log, Action<int, string> progress)
         {
@@ -1204,6 +1254,7 @@ namespace Sm64dsEnhanced
         {
             if (!Kit.Present) throw new BuildError(Kit.Missing);
             byte[] header = ReadHeader();
+            Resolve();
             try
             {
                 Directory.CreateDirectory(tmp);
@@ -1213,18 +1264,52 @@ namespace Sm64dsEnhanced
                 var work = Path.Combine(tmp, "work");
                 Directory.CreateDirectory(work);
                 log("Extracting the game data from your dump...");
-                Sm64dsEnhanced.Extract.Run(rom, Kit.Need("romdata.recipe.tsv"), Kit.Need("romdata.manifest"), work,
-                                           delegate (string line) { log("  " + line); },
-                                           delegate (int pct, string what) { progress(2 + pct * 68 / 100, what); });
+                Action<string> sub = delegate (string line) { log("  " + line); };
+                if (alone)
+                {
+                    log("Making the European game out of your " + Languages.Region(Korean.Code(rom)) +
+                        " dump (it has no European dump beside it)...");
+                    Regions.Run(rom, Kit.Need("romdata.recipe.tsv"), Kit.Need("romdata.manifest"), work, sub,
+                                delegate (int pct, string what) { progress(2 + pct * 68 / 100, what); });
+                }
+                else
+                    Sm64dsEnhanced.Extract.Run(rom, Kit.Need("romdata.recipe.tsv"), Kit.Need("romdata.manifest"), work,
+                                               sub, delegate (int pct, string what) { progress(2 + pct * 68 / 100, what); });
+                // the HOME Menu banner is made from the European files (its recipe is theirs)
+                var dsmt = Path.Combine(work, "extracted", "dsd", "files", "data", "DSMT");
+                string from2 = alone ? rom : Second;
+                if (from2 != null)
+                {
+                    var euDsmt = Path.Combine(tmp, "dsmt");
+                    CopyTree(dsmt, euDsmt);
+                    dsmt = euDsmt;
+                    string name = Languages.Name(Language);
+                    progress(71, "Reading the " + name + " text...");
+                    log("Extracting the " + name + " text from your " + Languages.Region(Languages.Dump(Language)) +
+                        " dump...");
+                    if (Language == "ko")
+                        Sm64dsEnhanced.Korean.Apply(work, Sm64dsEnhanced.Korean.Extract(Second, sub), sub);
+                    else
+                        Languages.ApplyRegion(work, Languages.ExtractRegion(from2, Language, sub), Language, sub);
+                }
+                else if (Language != null)
+                {
+                    File.WriteAllBytes(Path.Combine(work, "build", "assets", "langpack.bin"),
+                                       Languages.Langpack(Language, null));
+                    log("The game runs in " + Languages.Name(Language) + ".");
+                }
 
                 // 2. the RomFS
                 progress(72, "Packing the game files...");
                 var romfs = Path.Combine(tmp, "romfs");
                 var assets = Path.Combine(romfs, "build", "assets");
                 Directory.CreateDirectory(assets);
-                foreach (var name in new[] { "files.tsv", "handles.tsv", "nitrofs.tsv", "nitrofs_fat.bin",
-                                             "nitrofs_fnt.bin", "nitrofs_ovt9.bin", "romdata.bin",
-                                             "romdata.manifest" })
+                var names = new List<string> { "files.tsv", "handles.tsv", "nitrofs.tsv", "nitrofs_fat.bin",
+                                               "nitrofs_fnt.bin", "nitrofs_ovt9.bin", "romdata.bin",
+                                               "romdata.manifest" };
+                if (Language != null) names.Add("langpack.bin");
+                if (Language == "ko") names.Add("korean.bin");
+                foreach (var name in names)
                 {
                     var from = Path.Combine(work, "build", "assets", name);
                     if (!File.Exists(from))
@@ -1262,7 +1347,6 @@ namespace Sm64dsEnhanced
                 var template = Kit.Path("face.template");
                 if (File.Exists(template))
                 {
-                    var dsmt = Path.Combine(work, "extracted", "dsd", "files", "data", "DSMT");
                     var model = Face.Banner(dsmt, File.ReadAllBytes(template),
                                             File.ReadAllLines(Kit.Need("face.recipe")), logo, log);
                     if (model != null)
@@ -1285,9 +1369,11 @@ namespace Sm64dsEnhanced
                     Art.SaveSilence(sound);
                 }
                 var bannertool = Kit.Need("bannertool.exe");
-                Tool(bannertool, new[] { "makesmdh", "-s", Program.Title, "-l", Program.Title,
+                var name_ = Languages.Title(Language);
+                Tool(bannertool, new[] { "makesmdh", "-s", name_, "-l", name_,
                                          "-p", Program.Author, "-i", Path.Combine(art, "icon.png"),
                                          "-o", Path.Combine(art, "icon.smdh") }, "making the icon");
+                Languages.SmdhSlot(Path.Combine(art, "icon.smdh"), Language);
                 Tool(bannertool, new[] { "makebanner", bannerArt[0], bannerArt[1], "-a", sound,
                                          "-o", Path.Combine(art, "banner.bnr") }, "making the banner");
 
@@ -1343,11 +1429,71 @@ namespace Sm64dsEnhanced
             if (!code.StartsWith("ASM"))
                 throw new BuildError("This is not a Super Mario 64 DS dump (its game code is " +
                                      code.Replace('\0', ' ').Trim() + ").");
+            // the American or Japanese cartridge alone: its own edition (Regions.cs)
+            alone = Regions.Edition(code) != null && Second == null;
+            if (alone) return h;
+            if (Languages.OfDump(code) != null)
+                throw new BuildError("This is the " + Languages.Region(code) + " Super Mario 64 DS (" + code + "). " +
+                                     "The " + Languages.Name(Languages.OfDump(code)) + " edition of " +
+                                     Program.Title + " is built from it together with a dump of the European " +
+                                     "cartridge (ASMP), which has the game the port runs: give the European " +
+                                     "dump first and the " + Languages.Region(code) + " one second.");
             if (code != "ASMP")
                 throw new BuildError("This is Super Mario 64 DS, but not the European version (game code " +
                                      code + "). " + Program.Title + " is built from the European " +
                                      "cartridge (ASMP); its data does not come out of another region's.");
             return h;
+        }
+
+        // The edition: the second dump's, or the language asked for (sm64ds_builder.py's build checks).
+        void Resolve()
+        {
+            if (alone)
+            {
+                string code = Korean.Code(rom), own = Regions.Edition(code);
+                if (Language != null && Language != own)
+                    throw new BuildError(Languages.Known(Language) && Languages.Dump(Language) == code
+                        ? "The " + Languages.Region(code) + " cartridge alone makes the " + Languages.Name(own) +
+                          " edition. For the " + Languages.Name(Language) + " one, give a European dump (ASMP) " +
+                          "first and the " + Languages.Region(code) + " one second."
+                        : "The " + Languages.Region(code) + " cartridge alone makes the " + Languages.Name(own) +
+                          " edition; the " + (Languages.Known(Language) ? Languages.Name(Language) : Language) +
+                          " game is made from a European dump (ASMP).");
+                Language = own;
+                return;
+            }
+            if (Second != null)
+            {
+                string have = Korean.Code(Second);
+                if (!File.Exists(Second))
+                    throw new BuildError("The second dump could not be read: " + Second + " is not there.");
+                if (Languages.OfDump(have) == null)
+                    throw new BuildError("The second dump is not the Japanese (ASMJ), Korean (ASMK) or American " +
+                                         "(ASME) Super Mario 64 DS (its game code is " +
+                                         (have.Length > 0 ? System.Text.RegularExpressions.Regex.Replace(have, "[^ -~]", ".") : "missing") +
+                                         ").");
+                if (Language == null) Language = Languages.OfDump(have);
+            }
+            if (Language == null) return;
+            if (!Languages.Known(Language))
+                throw new BuildError("There is no language '" + Language + "'. The languages are: " +
+                                     string.Join(", ", Languages.Codes) + ".");
+            string need = Languages.Dump(Language);
+            if (need != null && (Second == null || Korean.Code(Second) != need))
+                throw new BuildError("The " + Languages.Name(Language) + " edition is built from the European dump " +
+                                     "and a dump of the " + Languages.Region(need) + " cartridge (" + need + "): " +
+                                     "give that one second.");
+            if (need == null && Second != null)
+                throw new BuildError("The " + Languages.Name(Language) + " game comes out of the European dump " +
+                                     "alone; the second dump would change it, so leave it out (or don't give " +
+                                     "--language).");
+        }
+
+        static void CopyTree(string from, string to)
+        {
+            Directory.CreateDirectory(to);
+            foreach (var f in Directory.GetFiles(from)) File.Copy(f, Path.Combine(to, Path.GetFileName(f)));
+            foreach (var d in Directory.GetDirectories(from)) CopyTree(d, Path.Combine(to, Path.GetFileName(d)));
         }
 
         void Tool(string exe, string[] args, string doing)
@@ -1564,9 +1710,28 @@ namespace Sm64dsEnhanced
         {
             byte[] ov = Overlay(rom, 7);
             if (ov == null) return null;
-            byte[] pal = Block(ov, 0x2bf08, 556, "8d3a76050a99c1b2007249164cb4047450ea607d5a70a01f90017a2cedf4cc2a");
-            byte[] scr = Block(ov, 0x30068, 6420, "eca1045a4f516efcfa532f0ed85bf97a2d9bef295db19f51d97825b35780b4fd");
-            byte[] chr = Block(ov, 0x3d08c, 33392, "16eac000c3f8de4135ccd1b78d465aa52bb350fba1323162f4ddf20f2f1bbc83");
+            const string palette = "8d3a76050a99c1b2007249164cb4047450ea607d5a70a01f90017a2cedf4cc2a";
+            const string screen = "eca1045a4f516efcfa532f0ed85bf97a2d9bef295db19f51d97825b35780b4fd";
+            byte[] pal, scr, chr;
+            switch (Korean.Code(rom))
+            {
+                case "ASMP":
+                    pal = Block(ov, 0x2bf08, 556, palette);
+                    scr = Block(ov, 0x30068, 6420, screen);
+                    chr = Block(ov, 0x3d08c, 33392, "16eac000c3f8de4135ccd1b78d465aa52bb350fba1323162f4ddf20f2f1bbc83");
+                    break;
+                case "ASME":
+                    pal = Block(ov, 0x2ba48, 556, palette);
+                    scr = Block(ov, 0x2fb80, 6420, screen);
+                    chr = Block(ov, 0x3cba4, 33392, "f168e397924567e3445561dad3f178b96608ec27ef7fae893da1bb6cf3335ad5");
+                    break;
+                case "ASMJ":
+                    pal = Block(ov, 0x2ba08, 556, "f09e6584545ea7ed02a6a5df60ce7a14a201a9beda1f59fa89367b0a316870c1");
+                    scr = Block(ov, 0x2f764, 6420, screen);
+                    chr = Block(ov, 0x3c788, 33388, "d2eda4d702a93acfb549c5db6514c76271347b470a60468700ed9ab3d72593c0");
+                    break;
+                default: return null;
+            }
             if (pal == null || scr == null || chr == null) return null;
 
             // PALT colours start at +0x20, the SCRN's 32x32 entries at +0x28, the

@@ -1054,16 +1054,16 @@ void present_body(Job &j, F inputs_read)
                 if (f + 1 == frames && eye == 0) ++g_xform_n[j.rec_ok ? (from_rec ? 2 : 1) : 0];
                 gpu3ds::resolve();   // the 2D from here on at the screen's own 1x
                 if (pass_on(PASS_OVERLAY))
-                    gpu3ds::overlay_draw(ov_main, j.blend ? gpu3ds::OVERLAY_KEPT_BLEND : gpu3ds::OVERLAY_KEPT,
-                                         vp);
+                    gpu3ds::overlay_draw_scaled(
+                        ov_main, j.blend ? gpu3ds::OVERLAY_KEPT_BLEND : gpu3ds::OVERLAY_KEPT, vp);
             } else {
-                gpu3ds::overlay_draw(ov_main, gpu3ds::OVERLAY_OPAQUE, vp);
+                gpu3ds::overlay_draw_scaled(ov_main, gpu3ds::OVERLAY_OPAQUE, vp);
             }
             // The menu layer, plane 1 then plane 2, as gpu_raster.cpp's composite
             // lays them (cp_lay_over), before or after the fade.
             auto draw_layer = [&]() {
-                gpu3ds::overlay_draw(ov_lay[0], gpu3ds::OVERLAY_PREMUL, vp);
-                if (j.lay_two) gpu3ds::overlay_draw(ov_lay[1], gpu3ds::OVERLAY_PREMUL, vp);
+                gpu3ds::overlay_draw_scaled(ov_lay[0], gpu3ds::OVERLAY_PREMUL, vp);
+                if (j.lay_two) gpu3ds::overlay_draw_scaled(ov_lay[1], gpu3ds::OVERLAY_PREMUL, vp);
             };
             if (j.lay && !j.lay_post) draw_layer();
             const bool fade_on = pass_on(PASS_FADE);
@@ -1104,9 +1104,9 @@ void present_body(Job &j, F inputs_read)
             const gpu3ds::Screen other_s = j.main_lower ? gpu3ds::SCREEN_TOP : gpu3ds::SCREEN_BOTTOM;
             const gpu3ds::Viewport ovp = viewport_for(other_s, ntr::SUB_W, ntr::SUB_H);
             // At 1.25x draw it sharp (overlay_sharpen) so every line of the pixel art keeps
-            // an even width. The 2x pass goes first since it has its own target.
-            const bool sharp = ovp.w != (float)ntr::SUB_W &&
-                               gpu3ds::overlay_sharpen(ov_other, ntr::SUB_W, ntr::SUB_H);
+            // an even width. The 2x pass goes first since it has its own target, and
+            // only when the screen is drawn: the main screen's 2D used the same texture.
+            const bool sharp = ovp.w != (float)ntr::SUB_W && gpu3ds::sharp_available();
             // Only redraw the bottom screen when it changed: if the transfer kept the
             // picture (same buffer number), the screen already shows it, so skip the
             // clear, quad and display transfer. GAME3DS_BOTTOM_EVERY=1 always draws.
@@ -1136,12 +1136,14 @@ void present_body(Job &j, F inputs_read)
             for (int eye = 0; eye < eyes; ++eye) {
                 if (eye) gpu3ds::set_eye(1);
                 if (eye || !gpu3ds::screen_holds(other_s, shown)) {
+                    const bool sharp_now =
+                        sharp && gpu3ds::overlay_sharpen(ov_other, ntr::SUB_W, ntr::SUB_H);
                     gpu3ds::frame_target(other_s, aff ? j.aff.backdrop : 0xFF000000u);
                     // the sprites over the BG: premultiplied (a 0 word adds
                     // nothing), which the sharp pass's bilinear keeps right
                     const gpu3ds::OverlayMode mode = aff ? gpu3ds::OVERLAY_PREMUL : gpu3ds::OVERLAY_OPAQUE;
                     if (aff) gpu3ds::affine_draw(j.aff, ovp, ntr::SUB_W, ntr::SUB_H);
-                    if (sharp)
+                    if (sharp_now)
                         gpu3ds::overlay_draw_sharp(ovp, mode);
                     else
                         gpu3ds::overlay_draw(ov_other, mode, ovp);

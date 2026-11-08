@@ -3,9 +3,10 @@
 
   py -I port3ds/builder/build_exe.py --label 1.0.0 --out SM64DS-Enhanced-Builder.exe
 
-Builder.cs, Extract.cs, Face.cs and Settings.cs, compiled by the C# 5 compiler
-in every Windows (Framework64/v4.0.30319/csc.exe), with builder.ico as its
-icon and the label as its version. It needs nothing else of the project, so
+Builder.cs, Extract.cs, Face.cs, Korean.cs, Languages.cs, Regions.cs and
+Settings.cs, compiled by the C# 5 compiler in every Windows
+(Framework64/v4.0.30319/csc.exe), with builder.ico as its icon and the label
+as its version. It needs nothing else of the project, so
 the release's .exe is built by GitHub Actions from the public repository
 (.github/workflows/builder.yml), where it can be signed; package.py runs this
 too, for the local zip.
@@ -18,7 +19,7 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 CSC = Path(r'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe')
-SOURCES = ('Builder.cs', 'Extract.cs', 'Face.cs', 'Settings.cs')
+SOURCES = ('Builder.cs', 'Extract.cs', 'Face.cs', 'Korean.cs', 'Languages.cs', 'Regions.cs', 'Settings.cs')
 
 
 def build(label, out):

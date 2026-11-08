@@ -121,8 +121,14 @@ void screens_forget();
 // texture, only if the slot changed), then overlay_draw_sharp (bilinear into
 // vp). False means it's unavailable (GAME3DS_SHARP=0 or no VRAM), so draw the
 // slot normally.
+bool sharp_available();   // the 2x texture is there (made on the first ask)
 bool overlay_sharpen(int slot, int w, int h);
 void overlay_draw_sharp(const Viewport &vp, OverlayMode mode = OVERLAY_OPAQUE);
+// overlay_draw for the screen being drawn, sharp when vp scales the picture by
+// a non-integer amount: in 256-column strips through the same 2x texture, so
+// call it after frame_target (and resolve), and never between an
+// overlay_sharpen and its overlay_draw_sharp. Falls back to overlay_draw.
+void overlay_draw_scaled(int slot, OverlayMode mode, const Viewport &vp);
 // Draw part of a slot's picture into vp: columns u0..u1 and rows v0..v1
 // (u1 < u0 mirrors). Used for the menu pillarbox fill.
 void overlay_draw_part(int slot, OverlayMode mode, const Viewport &vp, float u0, float v0,
